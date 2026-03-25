@@ -1,4 +1,5 @@
 import { CUE, BALL, TABLE } from './constants'
+import { useGameStore } from "../store/gameStore"
 
 let aimLine        = null
 let powerBar       = null
@@ -477,6 +478,13 @@ export function predictCueFirstContact(scene, angle) {
 // Helpers
 // ---------------------------------------------------------------------------
 function canShoot(scene) {
+  try {
+    const store = useGameStore.getState?.()
+    if (store?.selectingPocket) return false
+    if (scene._suppressShotUntil && Date.now() < scene._suppressShotUntil) return false
+  } catch (e) {
+    // ignore
+  }
   if (scene.registry.get('shotFired'))      return false
   if (scene.registry.get('placingCueBall')) return false
   const balls   = scene.registry.get('balls') || []

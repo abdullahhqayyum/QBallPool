@@ -152,3 +152,19 @@ export function checkPockets(scene, onPocket) {
     })
   })
 }
+
+export function drawPocketHighlights(graphics, pockets, selectedPocket) {
+  graphics.clear()
+
+  pockets.forEach((pocket, i) => {
+    const isActive = selectedPocket === null || selectedPocket === i
+
+    graphics.fillStyle(isActive ? 0xff0000 : 0x550000, 0.9)
+    graphics.fillCircle(pocket.x, pocket.y, 22)
+
+    if (isActive) {
+      graphics.lineStyle(3, 0xff4444, 1)
+      graphics.strokeCircle(pocket.x, pocket.y, 26)
+    }
+  })
+}
