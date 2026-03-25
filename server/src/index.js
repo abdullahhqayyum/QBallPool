@@ -10,6 +10,11 @@ const server = http.createServer(app)
 app.use(cors())
 app.use(express.json())
 
+// Health check / simple root response so platforms (Render) return 200 on GET /
+app.get('/', (req, res) => {
+  res.status(200).send('QBallPool server is running')
+})
+
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] }
 })
