@@ -1,0 +1,11 @@
+[build]
+  # Build from the client workspace
+  base = "client"
+  command = "npm run build"
+  publish = "dist"
+
+[[redirects]]
+  # SPA routing for client-side routes
+  from = "/*"
+  to = "/index.html"
+  status = 200
