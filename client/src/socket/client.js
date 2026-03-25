@@ -1,0 +1,80 @@
+import { io } from 'socket.io-client'
+
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001'
+const socket     = io(SERVER_URL, { autoConnect: false })
+
+let _scene = null
+let _onTurnDone = null
+
+export function setScene(scene) { _scene = scene }
+export function setOnTurnDone(cb) { _onTurnDone = cb }
+
+export function connectSocket()    { socket.connect() }
+export function disconnectSocket() { socket.disconnect() }
+
+export function joinRoom(roomId, playerId, gameId) {
+  if (!socket.connected) socket.connect()
+  socket.emit('join_room', { roomId, playerId, gameId })
+}
+
+export function sendTurnComplete(gameId, ballState, nextTurnPlayerId) {
+  socket.emit('turn_complete', { gameId, ballState, nextTurnPlayerId })
+}
+
+export function sendGameOver(gameId, winnerId) {
+  socket.emit('game_over', { gameId, winnerId })
+}
+
+socket.on('turn_done', ({ nextTurnPlayerId, ballState }) => {
+  if (!_scene) return
+
+  const userId = _scene.registry.get('userId')
+  const isMyTurn = nextTurnPlayerId === userId
+
+  _scene.registry.set('myTurn', isMyTurn)
+
+  if (isMyTurn && _onTurnDone) {
+    _onTurnDone(ballState)
+  }
+})
+
+socket.on('opponent_disconnected', ({ message }) => {
+  console.warn(message)
+  if (_scene) {
+    _scene.registry.set('opponentDisconnected', true)
+  }
+})
+
+socket.on('game_start', ({ player1_id, player2_id, current_turn, ballState }) => {
+  if (!_scene) return
+
+  const userId = _scene.registry.get('userId')
+
+  _scene.registry.set('player1_id', player1_id)
+  _scene.registry.set('player2_id', player2_id)
+  _scene.registry.set('opponentId', userId === player1_id ? player2_id : player1_id)
+  _scene.registry.set('myTurn', current_turn === userId)
+
+  if (ballState) {
+    _scene.registry.set('remoteBallState', ballState)
+  }
+
+  console.log(
+    'Game start — I am:', userId,
+    '| P1:', player1_id,
+    '| P2:', player2_id,
+    '| myTurn:', current_turn === userId,
+  )
+})
+
+socket.on('game_over', ({ winnerId }) => {
+  if (!_scene) return
+  const userId = _scene.registry.get('userId')
+  _scene.registry.set('gameResult', winnerId === userId ? 'win' : 'loss')
+})
+
+socket.on('error', ({ message }) => {
+  console.error('Socket error:', message)
+})
+
+export default socket
