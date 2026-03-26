@@ -109,26 +109,51 @@ export function drawTable(scene) {
   const { width, height, playX1, playX2, playY1, playY2 } = TABLE
   const gfx = scene.add.graphics()
 
+  // Full canvas wood background — matches engine backgroundColor so no black seam
   gfx.fillStyle(0x5c3a1e)
   gfx.fillRect(0, 0, width, height)
 
+  // Subtle wood grain lines
+  gfx.lineStyle(1, 0x4a2e14, 0.4)
+  for (let y = 8; y < height; y += 16) {
+    gfx.beginPath()
+    gfx.moveTo(0, y)
+    gfx.lineTo(width, y)
+    gfx.strokePath()
+  }
+
+  // Inner cushion shadow (dark band inside the wood)
+  const cushionW = playX1
+  gfx.fillStyle(0x3a2010)
+  gfx.fillRect(cushionW - 4, cushionW - 4, playX2 - playX1 + 8, 4)           // top
+  gfx.fillRect(cushionW - 4, playY2,       playX2 - playX1 + 8, 4)            // bottom
+  gfx.fillRect(cushionW - 4, cushionW - 4, 4, playY2 - playY1 + 8)            // left
+  gfx.fillRect(playX2,       cushionW - 4, 4, playY2 - playY1 + 8)            // right
+
+  // Green felt
   gfx.fillStyle(0x1a6b2a)
   gfx.fillRect(playX1, playY1, playX2 - playX1, playY2 - playY1)
 
+  // Felt centre line
   gfx.lineStyle(1, 0x177526, 0.3)
   gfx.beginPath()
   gfx.moveTo(width / 2, playY1)
   gfx.lineTo(width / 2, playY2)
   gfx.strokePath()
 
+  // Baulk circle (left quarter)
   gfx.lineStyle(1, 0x177526, 0.3)
   gfx.strokeCircle(width * 0.25, height / 2, 40)
 
+  // Pockets
   POCKET.positions.forEach(([px, py]) => {
-    gfx.fillStyle(0x000000, 0.6)
-    gfx.fillCircle(px + 1, py + 1, 20)
-    gfx.fillStyle(0x000000)
+    // Drop shadow
+    gfx.fillStyle(0x000000, 0.5)
+    gfx.fillCircle(px + 2, py + 2, 22)
+    // Pocket hole
+    gfx.fillStyle(0x050505)
     gfx.fillCircle(px, py, 20)
+    // Pocket rim
     gfx.lineStyle(2, 0x3a2010)
     gfx.strokeCircle(px, py, 20)
   })

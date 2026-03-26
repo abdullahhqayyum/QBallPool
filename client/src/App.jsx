@@ -6,6 +6,36 @@ import Lobby from './components/Lobby'
 import GameCanvas from './components/GameCanvas'
 import MatchResult from './components/MatchResult'
 
+// Inject mobile-friendly global styles once
+if (typeof document !== 'undefined') {
+  // Ensure viewport meta is correct
+  let meta = document.querySelector('meta[name="viewport"]')
+  if (!meta) {
+    meta = document.createElement('meta')
+    meta.name = 'viewport'
+    document.head.appendChild(meta)
+  }
+  meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover'
+
+  // Prevent body scroll / bounce on iOS
+  const style = document.createElement('style')
+  style.textContent = `
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      width: 100%; height: 100%;
+      background: #0a0a0a;
+      overflow: hidden;
+      overscroll-behavior: none;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+    #root { width: 100%; height: 100%; }
+    canvas { display: block !important; }
+  `
+  document.head.appendChild(style)
+}
+
 // screens: 'auth' | 'gamelist' | 'lobby' | 'game' | 'result'
 export default function App() {
   const [screen, setScreen]       = useState('auth')

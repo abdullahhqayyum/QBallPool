@@ -1,4 +1,3 @@
-
 import Phaser from 'phaser'
 import { createBalls, rehydrateBalls, syncBallGraphics, areBallsMoving, getBallState } from './balls'
 import { stepPhysics, drawTable, checkPockets } from './physics'
@@ -21,13 +20,36 @@ export function initEngine(containerId, gameState, onGameOver, onTurnEnd, onPock
     width:      TABLE.width,
     height:     TABLE.height,
     parent:     containerId,
-    backgroundColor: '#1a6b2a',
+    backgroundColor: '#5c3a1e',
+    // Responsive scaling — letterbox inside the container
+    scale: {
+      mode:            Phaser.Scale.FIT,
+      autoCenter:      Phaser.Scale.CENTER_BOTH,
+      width:           TABLE.width,
+      height:          TABLE.height,
+    },
     // No physics plugin — we run our own step
     scene: {
       create() { sceneCreate.call(this, gameState) },
       update() { sceneUpdate.call(this) },
     },
   }
+
+  // Remove any default margins Phaser adds to the canvas
+  const removeCanvasMargin = () => {
+    const container = document.getElementById(containerId)
+    if (!container) return
+    const canvas = container.querySelector('canvas')
+    if (canvas) {
+      canvas.style.display   = 'block'
+      canvas.style.margin    = '0'
+      canvas.style.padding   = '0'
+      canvas.style.outline   = 'none'
+      canvas.style.border    = 'none'
+    }
+  }
+  setTimeout(removeCanvasMargin, 50)
+  setTimeout(removeCanvasMargin, 300)
 
   return new Phaser.Game(config)
 }
