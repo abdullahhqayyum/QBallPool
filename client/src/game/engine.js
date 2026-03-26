@@ -27,9 +27,12 @@ export function getCanvasScale(game) {
 // Compute the CSS width we want the canvas to occupy.
 // Leaves 8 px of breathing room on each side for phones.
 function computeCssWidth() {
-  return Math.min(window.innerWidth - 8, TABLE.width)
+  const maxByWidth  = Math.min(window.innerWidth - 8, TABLE.width)
+  // In landscape the URL bar eats height — fit the table vertically too
+  const aspect      = TABLE.height / TABLE.width          // e.g. 0.5625
+  const maxByHeight = Math.floor((window.innerHeight - 80) / aspect) // 80px for HUD + breathing room
+  return Math.min(maxByWidth, maxByHeight)
 }
-
 export function initEngine(containerId, gameState, onGameOver, onTurnEnd, onPocket) {
   onGameOverCb = onGameOver
   onTurnEndCb  = onTurnEnd

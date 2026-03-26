@@ -13,17 +13,22 @@ function getBallColor(n) {
   return colors[n] || '#888'
 }
 
-function useWindowWidth() {
-  const [w, setW] = useState(window.innerWidth)
+function useWindowSize() {
+  const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight })
   useEffect(() => {
-    const handler = () => setW(window.innerWidth)
+    const handler = () => setSize({ w: window.innerWidth, h: window.innerHeight })
     window.addEventListener('resize', handler)
-    return () => window.removeEventListener('resize', handler)
+    window.addEventListener('orientationchange', () => setTimeout(handler, 150))
+    return () => {
+      window.removeEventListener('resize', handler)
+      window.removeEventListener('orientationchange', handler)
+    }
   }, [])
-  return w
+  return size
 }
 
 const TABLE_W = 800
+const TABLE_H = 450
 
 function getScale(windowWidth) {
   const maxW = Math.min(windowWidth - 8, TABLE_W)
@@ -46,8 +51,11 @@ export default function GameCanvas({ gameState, onGameOver }) {
   const [opponentDisconnected, setOpponentDisconnected] = useState(false)
   const [waitingForOpponent,   setWaitingForOpponent]   = useState(false)
 
-  const windowWidth = useWindowWidth()
-  const scale       = getScale(windowWidth)
+  const { w: windowWidth, h: windowHeight } = useWindowSize()
+  const maxByWidth  = Math.min(windowWidth - 8, TABLE_W)
+  const maxByHeight = Math.floor((windowHeight - 80) / (TABLE_H / TABLE_W))
+  const effectiveW  = Math.min(maxByWidth, maxByHeight)
+  const scale       = effectiveW / TABLE_W
   const hudWidth    = Math.round(TABLE_W * scale)
 
   useEffect(() => {
@@ -182,9 +190,11 @@ export default function GameCanvas({ gameState, onGameOver }) {
       alignItems:         'center',
       background:         '#0a0a0a',
       minHeight:          '100dvh',
-      justifyContent:     'center',
+      paddingTop:         'env(safe-area-inset-top, 0px)',
+      paddingBottom:      'env(safe-area-inset-bottom, 8px)',
       overflowX:          'hidden',
-      overscrollBehavior: 'none',
+      overflowY:          'auto',       // allow scroll if table still overflows
+      overscrollBehavior: 'contain',
     }}>
       {/* Canvas wrapper — no extra borders; all visuals are inside Phaser */}
       <div style={{ position: 'relative', lineHeight: 0, touchAction: 'none' }}>

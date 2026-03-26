@@ -23,14 +23,21 @@ if (typeof document !== 'undefined') {
     *, *::before, *::after { box-sizing: border-box; }
     html, body {
       margin: 0; padding: 0;
-      width: 100%; height: 100%;
+      width: 100%;
       background: #0a0a0a;
-      overflow: hidden;
-      overscroll-behavior: none;
       -webkit-tap-highlight-color: transparent;
       touch-action: manipulation;
     }
-    #root { width: 100%; height: 100%; }
+    body.screen-game {
+      overflow: auto;
+      overscroll-behavior: contain;
+    }
+    body.screen-locked {
+      overflow: hidden;
+      overscroll-behavior: none;
+      height: 100%;
+    }
+    #root { width: 100%; min-height: 100dvh; }
     canvas { display: block !important; }
   `
   document.head.appendChild(style)
@@ -51,6 +58,10 @@ export default function App() {
       }
     })
   }, [])
+  useEffect(() => {
+    document.body.classList.toggle('screen-game',   screen === 'game')
+    document.body.classList.toggle('screen-locked', screen !== 'game')
+  }, [screen])
 
   function handleAuth(user) {
     setUser(user)
