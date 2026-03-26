@@ -1,18 +1,16 @@
 import { CUE, BALL, TABLE } from './constants'
 import { useGameStore } from "../store/gameStore"
+import { getCanvasScale } from './engine'
 
 let aimLine        = null
 let powerBar       = null
 let pullLine       = null
 const MIN_AIM_DISTANCE = 10
 
-// Smooth the mouse position in PIXEL SPACE before computing atan2.
-// Angle-space lerp breaks at distance (1px mouse move = large angle delta).
-// Smoothing pixels first gives stable atan2 input at any distance.
 const PTR_SMOOTH_ALPHA     = 0.3
-const DEFLECT_SMOOTH_ALPHA = 0.25   // separate EMA for the deflect arrow endpoint
-let   smoothedPtr          = null   // { x, y } — reset each pointerdown
-let   smoothedDeflect      = null   // { x, y } — reset each pointerdown
+const DEFLECT_SMOOTH_ALPHA = 0.25
+let   smoothedPtr          = null
+let   smoothedDeflect      = null
 
 function smoothPointer(raw) {
   if (!smoothedPtr) {
@@ -38,9 +36,6 @@ function smoothDeflectEndpoint(raw) {
   return smoothedDeflect
 }
 
-// ---------------------------------------------------------------------------
-// Pointer stabilisation — kept only for release shot angle calculation
-// ---------------------------------------------------------------------------
 function stabilizePointer(previous, next) {
   if (!next) return previous || null
   if (!previous) return { x: next.x, y: next.y }
@@ -51,6 +46,23 @@ function stabilizePointer(previous, next) {
   return {
     x: previous.x + dx * CUE.pointerSmoothingAlpha,
     y: previous.y + dy * CUE.pointerSmoothingAlpha,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Convert a DOM clientX/Y to game-space coordinates.
+// Because we CSS-scale the canvas (keeping the internal resolution at
+// TABLE.width × TABLE.height), raw clientX is in screen pixels and must be
+// divided by the current CSS scale factor.
+// ---------------------------------------------------------------------------
+function clientToGame(scene, clientX, clientY) {
+  const canvas = scene.game?.canvas
+  if (!canvas) return { x: clientX, y: clientY }
+  const rect  = canvas.getBoundingClientRect()
+  const scale = rect.width / TABLE.width    // CSS width ÷ logical width
+  return {
+    x: (clientX - rect.left)  / scale,
+    y: (clientY - rect.top)   / scale,
   }
 }
 
@@ -66,10 +78,10 @@ export function setupCue(scene, onShoot) {
   let dragCurrent = null
   let power       = 0
 
-  const releaseShot = (x, y) => {
+  const releaseShot = (gameX, gameY) => {
     if (!dragStart) return
 
-    const rawRelease  = { x, y }
+    const rawRelease   = { x: gameX, y: gameY }
     const releasePoint = !dragCurrent
       ? rawRelease
       : Math.hypot(rawRelease.x - dragCurrent.x, rawRelease.y - dragCurrent.y) <= CUE.releaseBlendThresholdPx
@@ -102,10 +114,11 @@ export function setupCue(scene, onShoot) {
     power = 0
   }
 
-  const renderDrag = (current) => {
+  const renderDrag = (gameX, gameY) => {
     if (!dragStart) return
-    const dist = Math.hypot(current.x - dragStart.x, current.y - dragStart.y)
-    power      = Math.min((dist / CUE.dragForMaxPower) * CUE.maxPower, CUE.maxPower)
+    const current = { x: gameX, y: gameY }
+    const dist    = Math.hypot(current.x - dragStart.x, current.y - dragStart.y)
+    power         = Math.min((dist / CUE.dragForMaxPower) * CUE.maxPower, CUE.maxPower)
 
     const cueBall = getCueBall(scene)
     if (!cueBall) return
@@ -117,31 +130,53 @@ export function setupCue(scene, onShoot) {
     updateCursor(scene, current, angle)
   }
 
+  // ---- Mouse events on window (catches drags that leave the canvas) --------
   const handleWindowMouseMove = (evt) => {
     if (!dragStart) return
-    const rect = scene.game.canvas.getBoundingClientRect()
-    // Raw position for rendering — no stabilization so aim line is always current
-    const raw = { x: evt.clientX - rect.left, y: evt.clientY - rect.top }
-    dragCurrent = raw
-    renderDrag(raw)
+    const gp = clientToGame(scene, evt.clientX, evt.clientY)
+    dragCurrent = gp
+    renderDrag(gp.x, gp.y)
+    smoothPointer(gp)
   }
 
   const handleWindowMouseUp = (evt) => {
     if (!dragStart) return
-    const rect = scene.game.canvas.getBoundingClientRect()
-    releaseShot(evt.clientX - rect.left, evt.clientY - rect.top)
+    const gp = clientToGame(scene, evt.clientX, evt.clientY)
+    releaseShot(gp.x, gp.y)
   }
 
-  window.addEventListener('mousemove', handleWindowMouseMove)
-  window.addEventListener('mouseup',   handleWindowMouseUp)
+  // ---- Touch events on window (mobile drag-to-aim) -------------------------
+  const handleWindowTouchMove = (evt) => {
+    if (!dragStart) return
+    evt.preventDefault()
+    const t  = evt.changedTouches[0]
+    const gp = clientToGame(scene, t.clientX, t.clientY)
+    dragCurrent = gp
+    renderDrag(gp.x, gp.y)
+    smoothPointer(gp)
+  }
 
+  const handleWindowTouchEnd = (evt) => {
+    if (!dragStart) return
+    evt.preventDefault()
+    const t  = evt.changedTouches[0]
+    const gp = clientToGame(scene, t.clientX, t.clientY)
+    releaseShot(gp.x, gp.y)
+  }
+
+  window.addEventListener('mousemove',  handleWindowMouseMove)
+  window.addEventListener('mouseup',    handleWindowMouseUp)
+  window.addEventListener('touchmove',  handleWindowTouchMove, { passive: false })
+  window.addEventListener('touchend',   handleWindowTouchEnd,  { passive: false })
+
+  // ---- Phaser pointer events (already in game-space) -----------------------
   scene.input.on('pointermove', (ptr) => {
     if (!canShoot(scene)) return
-    // Always use raw pointer for rendering — no stabilization here.
-    // Stabilization only applies at release to smooth the final shot angle.
+    // Phaser pointer coords are already in game-space — no conversion needed
     if (dragStart) {
       dragCurrent = { x: ptr.x, y: ptr.y }
-      renderDrag(dragCurrent)
+      renderDrag(ptr.x, ptr.y)
+      smoothPointer({ x: ptr.x, y: ptr.y })
     } else {
       const cueBall = getCueBall(scene)
       if (!cueBall) return
@@ -156,28 +191,28 @@ export function setupCue(scene, onShoot) {
     dragStart   = { x: ptr.x, y: ptr.y }
     dragCurrent = { x: ptr.x, y: ptr.y }
     power = 0
-    smoothedPtr = null; smoothedDeflect = null   // snap fresh each click
+    smoothedPtr = null; smoothedDeflect = null
   })
 
   scene.input.on('pointerup', (ptr) => {
     releaseShot(ptr.x, ptr.y)
   })
 
-  scene.events.once('shutdown', () => {
-    window.removeEventListener('mousemove', handleWindowMouseMove)
-    window.removeEventListener('mouseup',   handleWindowMouseUp)
-  })
-  scene.events.once('destroy', () => {
-    window.removeEventListener('mousemove', handleWindowMouseMove)
-    window.removeEventListener('mouseup',   handleWindowMouseUp)
-  })
+  const cleanup = () => {
+    window.removeEventListener('mousemove',  handleWindowMouseMove)
+    window.removeEventListener('mouseup',    handleWindowMouseUp)
+    window.removeEventListener('touchmove',  handleWindowTouchMove)
+    window.removeEventListener('touchend',   handleWindowTouchEnd)
+  }
+  scene.events.once('shutdown', cleanup)
+  scene.events.once('destroy',  cleanup)
 }
 
 export function resetCue(scene) {
   if (aimLine)  aimLine.clear()
   if (powerBar) powerBar.clear()
   if (pullLine) pullLine.clear()
-  smoothedPtr = null; smoothedDeflect = null   // snap fresh on next aim
+  smoothedPtr = null; smoothedDeflect = null
   if (scene) {
     scene.registry.set('shotFired',           false)
     scene.registry.set('firstCueContactLabel', null)
@@ -185,7 +220,7 @@ export function resetCue(scene) {
 }
 
 // ---------------------------------------------------------------------------
-// Shoot — sets velocity directly on plain ball object
+// Shoot
 // ---------------------------------------------------------------------------
 export function shootCue(scene, angle, power) {
   const cueBall = getCueBall(scene)
@@ -193,7 +228,6 @@ export function shootCue(scene, angle, power) {
 
   const normalizedPower = Math.max(0, Math.min(1, power / CUE.maxPower))
   const curvedPower     = Math.pow(normalizedPower, CUE.powerCurve)
-  // Convert force to velocity units (scale chosen to feel similar to before)
   const speed = (CUE.minForce + (CUE.maxForce - CUE.minForce) * curvedPower) * 280
 
   cueBall.vx = Math.cos(angle) * speed
@@ -201,8 +235,7 @@ export function shootCue(scene, angle, power) {
 }
 
 // ---------------------------------------------------------------------------
-// Aim line drawing — smooths pointer in pixel space then derives angle.
-// Also smooths the deflect arrow endpoint separately so it never jitters.
+// Aim line drawing
 // ---------------------------------------------------------------------------
 function drawAimLine(scene, ptr) {
   const cueBall = getCueBall(scene)
@@ -216,7 +249,7 @@ function drawAimLine(scene, ptr) {
 
   aimLine.clear()
 
-  // Cue stick behind ball
+  // Cue stick
   aimLine.lineStyle(1.5, 0xd4a96a, 0.6)
   aimLine.beginPath()
   aimLine.moveTo(cx - Math.cos(angle) * BALL.radius, cy - Math.sin(angle) * BALL.radius)
@@ -235,21 +268,15 @@ function drawAimLine(scene, ptr) {
 
     const { ghostX, ghostY, deflectAngle, centrality } = impact
 
-    // Dotted line cue ball → ghost position
     drawDottedLine(aimLine, cx, cy, ghostX, ghostY, 0xffffff, 0.35)
 
-    // Ghost ball circle at impact point
     aimLine.lineStyle(1, 0xffffff, 0.3)
     aimLine.strokeCircle(ghostX, ghostY, BALL.radius)
 
-    // Arrow tip at ghost ball (cue direction)
     drawArrowTip(aimLine, ghostX, ghostY, angle, 0xffffff, 0.35)
 
-    // --- Object ball deflection line ---
-    // Length scales with centrality: dead centre = long, edge hit = short
-    // centrality: 1.0 = perfectly centred, 0.0 = glancing edge
-    const MAX_DEFLECT = 140
-    const MIN_DEFLECT = 20
+    const MAX_DEFLECT  = 140
+    const MIN_DEFLECT  = 20
     const deflectLength = MIN_DEFLECT + (MAX_DEFLECT - MIN_DEFLECT) * centrality
 
     const hx    = hit.x
@@ -257,8 +284,6 @@ function drawAimLine(scene, ptr) {
     const rawEx = hx + Math.cos(deflectAngle) * deflectLength
     const rawEy = hy + Math.sin(deflectAngle) * deflectLength
 
-    // Smooth the endpoint in pixel space — without this the tip jitters
-    // visibly because small angle changes are amplified over deflectLength.
     const sde = smoothDeflectEndpoint({ x: rawEx, y: rawEy })
     const smoothDeflectAngle = Math.atan2(sde.y - hy, sde.x - hx)
 
@@ -280,12 +305,6 @@ function drawAimLine(scene, ptr) {
 // ---------------------------------------------------------------------------
 // Geometry helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Returns impact geometry including `centrality` (0–1).
- * centrality = 1 → dead-centre hit (max deflect line length)
- * centrality = 0 → glancing edge hit (min deflect line length)
- */
 function getImpactGeometry(cueBall, targetBall, angle) {
   const dx = Math.cos(angle)
   const dy = Math.sin(angle)
@@ -301,7 +320,7 @@ function getImpactGeometry(cueBall, targetBall, angle) {
 
   const closestX = cx + dx * t
   const closestY = cy + dy * t
-  const offset   = Math.hypot(bx - closestX, by - closestY) // lateral miss distance
+  const offset   = Math.hypot(bx - closestX, by - closestY)
 
   const radiusSum   = BALL.radius * 2
   const radiusSumSq = radiusSum * radiusSum
@@ -313,19 +332,17 @@ function getImpactGeometry(cueBall, targetBall, angle) {
   const ghostX     = cx + dx * (t - backDist)
   const ghostY     = cy + dy * (t - backDist)
   const deflectAngle = Math.atan2(by - ghostY, bx - ghostX)
-
-  // centrality: 1 when offset=0 (dead centre), 0 when offset=radiusSum (edge)
   const centrality = 1 - (offset / radiusSum)
 
   return { ghostX, ghostY, deflectAngle, centrality }
 }
 
 function getFirstHitBall(scene, cx, cy, angle) {
-  const balls     = scene.registry.get('balls') || []
-  const dx        = Math.cos(angle)
-  const dy        = Math.sin(angle)
-  let   closest   = null
-  let   closestT  = Infinity
+  const balls    = scene.registry.get('balls') || []
+  const dx       = Math.cos(angle)
+  const dy       = Math.sin(angle)
+  let   closest  = null
+  let   closestT = Infinity
 
   balls.forEach(ball => {
     if (ball.pocketed)        return
@@ -429,9 +446,10 @@ function drawPullLine(scene, dragStart, ptr, power) {
 }
 
 // ---------------------------------------------------------------------------
-// Cursor
+// Cursor (desktop only — no-op on touch)
 // ---------------------------------------------------------------------------
 function updateCursor(scene, ptr, angle) {
+  if (!scene.game?.canvas) return
   const myType  = scene.registry.get('myType')
   const myTurn  = scene.registry.get('myTurn')
   const cueBall = getCueBall(scene)
@@ -482,13 +500,11 @@ function canShoot(scene) {
     const store = useGameStore.getState?.()
     if (store?.selectingPocket) return false
     if (scene._suppressShotUntil && Date.now() < scene._suppressShotUntil) return false
-  } catch (e) {
-    // ignore
-  }
+  } catch (e) {}
   if (scene.registry.get('shotFired'))      return false
   if (scene.registry.get('placingCueBall')) return false
-  const balls   = scene.registry.get('balls') || []
-  const moving  = balls.some(b => !b.pocketed && (Math.abs(b.vx) > 0.08 || Math.abs(b.vy) > 0.08))
+  const balls  = scene.registry.get('balls') || []
+  const moving = balls.some(b => !b.pocketed && (Math.abs(b.vx) > 0.08 || Math.abs(b.vy) > 0.08))
   if (moving) return false
   const mode = scene.registry.get('mode')
   if (mode === 'online') return !!scene.registry.get('myTurn')

@@ -8,54 +8,86 @@ let onGameOverCb = null
 let onTurnEndCb  = null
 let onPocketCb   = null
 
+// ---------------------------------------------------------------------------
+// Scale helpers — game always runs at TABLE.width × TABLE.height internally.
+// The canvas is CSS-scaled down to fit the viewport. Pointer events arrive in
+// CSS pixels so we must divide by this factor to get game-space coordinates.
+// ---------------------------------------------------------------------------
+export function getCanvasScale(game) {
+  try {
+    const canvas = game?.canvas
+    if (!canvas) return 1
+    const rect    = canvas.getBoundingClientRect()
+    return rect.width / TABLE.width   // CSS width / logical width
+  } catch {
+    return 1
+  }
+}
+
+// Compute the CSS width we want the canvas to occupy.
+// Leaves 8 px of breathing room on each side for phones.
+function computeCssWidth() {
+  return Math.min(window.innerWidth - 8, TABLE.width)
+}
+
 export function initEngine(containerId, gameState, onGameOver, onTurnEnd, onPocket) {
   onGameOverCb = onGameOver
   onTurnEndCb  = onTurnEnd
   onPocketCb   = onPocket
 
   const config = {
-    type:       Phaser.AUTO,
-    pixelArt:   false,
-    antialias:  true,
-    width:      TABLE.width,
-    height:     TABLE.height,
-    parent:     containerId,
+    type:            Phaser.AUTO,
+    pixelArt:        false,
+    antialias:       true,
+    width:           TABLE.width,
+    height:          TABLE.height,
+    parent:          containerId,
     backgroundColor: '#5c3a1e',
-    // Responsive scaling — letterbox inside the container
-    scale: {
-      mode:            Phaser.Scale.FIT,
-      autoCenter:      Phaser.Scale.CENTER_BOTH,
-      width:           TABLE.width,
-      height:          TABLE.height,
-    },
-    // No physics plugin — we run our own step
+    // We do NOT use Phaser.Scale.FIT — it changes the internal resolution and
+    // breaks pointer coordinates. Instead we set the canvas CSS size manually.
     scene: {
       create() { sceneCreate.call(this, gameState) },
       update() { sceneUpdate.call(this) },
     },
   }
 
-  // Remove any default margins Phaser adds to the canvas
-  const removeCanvasMargin = () => {
-    const container = document.getElementById(containerId)
-    if (!container) return
-    const canvas = container.querySelector('canvas')
-    if (canvas) {
-      canvas.style.display   = 'block'
-      canvas.style.margin    = '0'
-      canvas.style.padding   = '0'
-      canvas.style.outline   = 'none'
-      canvas.style.border    = 'none'
-    }
-  }
-  setTimeout(removeCanvasMargin, 50)
-  setTimeout(removeCanvasMargin, 300)
+  const game = new Phaser.Game(config)
 
-  return new Phaser.Game(config)
+  // Apply CSS scaling once the canvas exists, and on every resize.
+  const applyScale = () => {
+    const canvas = game.canvas
+    if (!canvas) return
+    const cssW = computeCssWidth()
+    const cssH = Math.round(cssW * (TABLE.height / TABLE.width))
+    canvas.style.width      = cssW + 'px'
+    canvas.style.height     = cssH + 'px'
+    canvas.style.display    = 'block'
+    canvas.style.margin     = '0 auto'
+    canvas.style.border     = 'none'
+    canvas.style.outline    = 'none'
+    canvas.style.touchAction = 'none'
+  }
+
+  // Canvas may not exist yet on the very first tick
+  setTimeout(applyScale, 30)
+  setTimeout(applyScale, 200)   // insurance
+
+  window.addEventListener('resize',            applyScale)
+  window.addEventListener('orientationchange', applyScale)
+
+  // Store cleanup so destroyEngine can remove the listeners
+  game.__scaleCleanup = () => {
+    window.removeEventListener('resize',            applyScale)
+    window.removeEventListener('orientationchange', applyScale)
+  }
+
+  return game
 }
 
 export function destroyEngine(game) {
-  if (game) game.destroy(true)
+  if (!game) return
+  if (typeof game.__scaleCleanup === 'function') game.__scaleCleanup()
+  game.destroy(true)
 }
 
 // ---------------------------------------------------------------------------
@@ -149,11 +181,9 @@ function sceneUpdate() {
 
     balls.forEach(b => {
       if (!b._collidedWith) return
-      // If the cue ball collided with something
       if (b.label === 'cue' && b._collidedWith) {
         registerFirstCueContact(this, b._collidedWith)
       }
-      // If something collided with the cue ball
       if (b._collidedWith === 'cue') {
         registerFirstCueContact(this, b.label)
       }
@@ -199,7 +229,7 @@ function sceneUpdate() {
 }
 
 // ---------------------------------------------------------------------------
-// Pocket handler (unchanged logic)
+// Pocket handler
 // ---------------------------------------------------------------------------
 function handlePocket(scene, ball) {
   if (scene.registry.get('gameResult')) return
@@ -245,7 +275,7 @@ function handlePocket(scene, ball) {
 }
 
 // ---------------------------------------------------------------------------
-// Turn end (unchanged logic)
+// Turn end
 // ---------------------------------------------------------------------------
 function handleTurnEnd(scene) {
   scene.registry.set('foul', false)
@@ -351,10 +381,6 @@ function handleTurnEnd(scene) {
     const hasStripe = objectBalls.some(b => b.type === 'stripe')
 
     if (hasSolid && hasStripe) {
-      // If both solids and stripes were pocketed on the same turn,
-      // automatically assign the shooter's type based on the first
-      // ball pocketed (no modal choice). The first element of
-      // pocketedThisTurn preserves pocket order.
       const first = objectBalls[0]
       if (first && first.type) {
         assignedType = myTurn ? first.type : (first.type === 'solid' ? 'stripe' : 'solid')
@@ -420,7 +446,7 @@ function notify(scene, payload) {
 }
 
 // ---------------------------------------------------------------------------
-// Cue ball placement (updated to use plain objects)
+// Cue ball placement
 // ---------------------------------------------------------------------------
 function isValidCuePlacement(scene, cueBall, x, y) {
   const balls = scene.registry.get('balls') || []
@@ -453,9 +479,9 @@ function respawnCueBall(scene, onPlaced) {
   cueBall.pocketed = false
   if (cueBall.gfx) cueBall.gfx.setVisible(true)
 
-  const clampToTable = (ptr) => ({
-    x: Math.max(TABLE.playX1 + BALL.radius, Math.min(TABLE.playX2 - BALL.radius, ptr.x)),
-    y: Math.max(TABLE.playY1 + BALL.radius, Math.min(TABLE.playY2 - BALL.radius, ptr.y)),
+  const clampToTable = (x, y) => ({
+    x: Math.max(TABLE.playX1 + BALL.radius, Math.min(TABLE.playX2 - BALL.radius, x)),
+    y: Math.max(TABLE.playY1 + BALL.radius, Math.min(TABLE.playY2 - BALL.radius, y)),
   })
 
   let previewPos = { x: TABLE.width * 0.25, y: TABLE.height * 0.5 }
@@ -464,14 +490,16 @@ function respawnCueBall(scene, onPlaced) {
   if (cueBall.gfx) cueBall.gfx.setPosition(previewPos.x, previewPos.y)
 
   const moveHandler = (ptr) => {
-    previewPos = clampToTable(ptr)
+    // ptr.x / ptr.y are already in game-space because Phaser applies the
+    // canvas CSS scale to pointer events internally via ScaleManager
+    previewPos = clampToTable(ptr.x, ptr.y)
     cueBall.x  = previewPos.x
     cueBall.y  = previewPos.y
     if (cueBall.gfx) cueBall.gfx.setPosition(previewPos.x, previewPos.y)
   }
 
   const placeHandler = (ptr) => {
-    const pos = clampToTable(ptr)
+    const pos = clampToTable(ptr.x, ptr.y)
     if (!isValidCuePlacement(scene, cueBall, pos.x, pos.y)) return
 
     cueBall.x = pos.x
@@ -496,7 +524,7 @@ function respawnCueBall(scene, onPlaced) {
 }
 
 // ---------------------------------------------------------------------------
-// First contact tracking (now driven from stepPhysics _collidedWith tags)
+// First contact tracking
 // ---------------------------------------------------------------------------
 function registerFirstCueContact(scene, label) {
   if (!scene.registry.get('shotFired'))        return
@@ -508,7 +536,7 @@ function registerFirstCueContact(scene, label) {
 }
 
 // ---------------------------------------------------------------------------
-// Diagnostics (unchanged, works with new plain objects)
+// Diagnostics
 // ---------------------------------------------------------------------------
 function startCollisionDiagnostics(scene) {
   if (scene.registry.get('__collisionDiag')?.enabled) return
@@ -566,7 +594,6 @@ function finalizeDiagnosticShot(scene) {
   const active = diag?.activeShot
   if (!diag?.enabled || !active) return
 
-  // For diagnostics, read actual first contact from registry
   const actualLabel = scene.registry.get('firstCueContactLabel') || 'none'
   const actualKind  = actualLabel === 'none' ? 'none' : actualLabel === 'cushion' ? 'wall' : 'ball'
 
