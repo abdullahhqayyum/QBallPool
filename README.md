@@ -90,7 +90,11 @@ alter table games
 │  └─ src/
 │     ├─ main.jsx                 # app bootstrap
 │     ├─ App.jsx                  # root React component
-│     ├─ components/              # React UI
+│     ├─ pages/                   # thin page wrappers (layout/routing)
+│     │  ├─ AuthPage.jsx
+│     │  ├─ GameListPage.jsx
+│     │  └─ LobbyPage.jsx
++│     ├─ components/              # React UI (pure components)
 │     │  ├─ Auth.jsx
 │     │  ├─ GameCanvas.jsx        # mounts Phaser canvas
 │     │  ├─ GameList.jsx
