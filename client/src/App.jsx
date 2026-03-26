@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import supabase from './lib/supabase'
-import Auth from './components/Auth'
-import GameList from './components/GameList'
-import Lobby from './components/Lobby'
+import AuthPage from './pages/AuthPage'
+import GameListPage from './pages/GameListPage'
+import LobbyPage from './pages/LobbyPage'
 import GameCanvas from './components/GameCanvas'
 import MatchResult from './components/MatchResult'
 
@@ -95,16 +95,16 @@ export default function App() {
 
   return (
     <div>
-      {screen === 'auth'     && <Auth onAuth={handleAuth} onGuest={handleGuest} />}
+      {screen === 'auth'     && <AuthPage onAuth={handleAuth} onGuest={handleGuest} />}
       {screen === 'gamelist' && (
-        <GameList
+        <GameListPage
           user={user}
           onJoinGame={handleJoinGame}
           onNewGame={handleNewGame}
         />
       )}
       {screen === 'lobby'    && (
-        <Lobby
+        <LobbyPage
           user={user}
           onStart={(state) => {
             const resolvedState = state?.user ? state : { ...state, user }
