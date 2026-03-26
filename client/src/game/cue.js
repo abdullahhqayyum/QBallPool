@@ -122,7 +122,6 @@ export function setupCue(scene, onShoot) {
 
     const cueBall = getCueBall(scene)
     if (!cueBall) return
-
     const angle = Math.atan2(cueBall.y - current.y, cueBall.x - current.x)
     drawAimLine(scene, current)
     drawPowerBar(scene, power)
@@ -520,4 +519,57 @@ function areMyBallsDone(scene) {
   const myType = scene.registry.get('myType')
   const balls  = scene.registry.get('balls') || []
   return balls.filter(b => b.type === myType).every(b => b.pocketed)
+}
+
+function drawAimLineByAngle(scene, angle) {
+  const cueBall = getCueBall(scene)
+  if (!cueBall || !aimLine) return
+
+  const cx = cueBall.x
+  const cy = cueBall.y
+
+  aimLine.clear()
+
+  // Cue stick
+  aimLine.lineStyle(1.5, 0xd4a96a, 0.6)
+  aimLine.beginPath()
+  aimLine.moveTo(cx - Math.cos(angle) * BALL.radius, cy - Math.sin(angle) * BALL.radius)
+  aimLine.lineTo(cx - Math.cos(angle) * (BALL.radius + 80), cy - Math.sin(angle) * (BALL.radius + 80))
+  aimLine.strokePath()
+
+  const hit = getFirstHitBall(scene, cx, cy, angle)
+
+  if (hit) {
+    const impact = getImpactGeometry(cueBall, hit, angle)
+    if (!impact) {
+      const wallPoint = raycastToWall(cx, cy, angle)
+      drawDottedLine(aimLine, cx, cy, wallPoint.x, wallPoint.y, 0xffffff, 0.2)
+      return
+    }
+    const { ghostX, ghostY, deflectAngle, centrality } = impact
+    drawDottedLine(aimLine, cx, cy, ghostX, ghostY, 0xffffff, 0.35)
+    aimLine.lineStyle(1, 0xffffff, 0.3)
+    aimLine.strokeCircle(ghostX, ghostY, BALL.radius)
+    drawArrowTip(aimLine, ghostX, ghostY, angle, 0xffffff, 0.35)
+
+    const MAX_DEFLECT   = 140
+    const MIN_DEFLECT   = 20
+    const deflectLength = MIN_DEFLECT + (MAX_DEFLECT - MIN_DEFLECT) * centrality
+    const hx    = hit.x
+    const hy    = hit.y
+    const rawEx = hx + Math.cos(deflectAngle) * deflectLength
+    const rawEy = hy + Math.sin(deflectAngle) * deflectLength
+    const sde   = smoothDeflectEndpoint({ x: rawEx, y: rawEy })
+    const smoothDeflectAngle = Math.atan2(sde.y - hy, sde.x - hx)
+    aimLine.lineStyle(1.5, 0xffdd44, 0.6)
+    aimLine.beginPath()
+    aimLine.moveTo(hx, hy)
+    aimLine.lineTo(sde.x, sde.y)
+    aimLine.strokePath()
+    drawArrowTip(aimLine, sde.x, sde.y, smoothDeflectAngle, 0xffdd44, 0.6)
+  } else {
+    const wallPoint = raycastToWall(cx, cy, angle)
+    drawDottedLine(aimLine, cx, cy, wallPoint.x, wallPoint.y, 0xffffff, 0.2)
+    drawArrowTip(aimLine, wallPoint.x, wallPoint.y, angle, 0xffffff, 0.35)
+  }
 }
