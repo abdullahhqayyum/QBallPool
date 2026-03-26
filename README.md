@@ -94,7 +94,7 @@ alter table games
 │     │  ├─ AuthPage.jsx
 │     │  ├─ GameListPage.jsx
 │     │  └─ LobbyPage.jsx
-+│     ├─ components/              # React UI (pure components)
+│     ├─ components/              # React UI (pure components)
 │     │  ├─ Auth.jsx
 │     │  ├─ GameCanvas.jsx        # mounts Phaser canvas
 │     │  ├─ GameList.jsx
