@@ -10,7 +10,7 @@ const MIN_AIM_DISTANCE = 10
 const PTR_SMOOTH_ALPHA     = 0.3
 const DEFLECT_SMOOTH_ALPHA = 0.25
 // How much the aim angle drifts per frame while dragging back (0 = frozen, 1 = full tracking)
-const AIM_DRAG_SENSITIVITY = 0.08
+const AIM_DRAG_SENSITIVITY = 0.03
 // If the pointer comes within this many px of the cue ball during drag, cancel the shot
 const CANCEL_RADIUS = 20
 let   smoothedPtr          = null
@@ -295,15 +295,15 @@ function drawAimLine(scene, ptr) {
   const cueBall = getCueBall(scene)
   if (!cueBall || !aimLine) return
 
-  const sp    = smoothPointer(ptr)
-  const angle = Math.atan2(cueBall.y - sp.y, cueBall.x - sp.x)
+  // Use raw pointer directly — no smoothing so the drawn line matches
+  // exactly the angle that will be locked on pointerdown
+  const angle = Math.atan2(cueBall.y - ptr.y, cueBall.x - ptr.x)
 
   const cx = cueBall.x
   const cy = cueBall.y
 
   aimLine.clear()
 
-  // Cue stick
   aimLine.lineStyle(1.5, 0xd4a96a, 0.6)
   aimLine.beginPath()
   aimLine.moveTo(cx - Math.cos(angle) * BALL.radius, cy - Math.sin(angle) * BALL.radius)
@@ -319,36 +319,39 @@ function drawAimLine(scene, ptr) {
       drawDottedLine(aimLine, cx, cy, wallPoint.x, wallPoint.y, 0xffffff, 0.2)
       return
     }
+    const { ghostX, ghostY, deflectAngle, targetAngle, centrality } = impact
 
-    const { ghostX, ghostY, deflectAngle, centrality } = impact
-
+    // Cue path up to ghost ball position
     drawDottedLine(aimLine, cx, cy, ghostX, ghostY, 0xffffff, 0.35)
-
     aimLine.lineStyle(1, 0xffffff, 0.3)
     aimLine.strokeCircle(ghostX, ghostY, BALL.radius)
-
     drawArrowTip(aimLine, ghostX, ghostY, angle, 0xffffff, 0.35)
 
-    const MAX_DEFLECT  = 140
-    const MIN_DEFLECT  = 20
+    const MAX_DEFLECT   = 140
+    const MIN_DEFLECT   = 20
     const deflectLength = MIN_DEFLECT + (MAX_DEFLECT - MIN_DEFLECT) * centrality
 
-    const hx    = hit.x
-    const hy    = hit.y
-    const rawEx = hx + Math.cos(deflectAngle) * deflectLength
-    const rawEy = hy + Math.sin(deflectAngle) * deflectLength
-
-    const sde = smoothDeflectEndpoint({ x: rawEx, y: rawEy })
-    const smoothDeflectAngle = Math.atan2(sde.y - hy, sde.x - hx)
-
-    aimLine.lineStyle(1.5, 0xffdd44, 0.6)
+    // Yellow arrow — target ball direction (physics-accurate)
+    const tex = hit.x + Math.cos(targetAngle) * deflectLength
+    const tey = hit.y + Math.sin(targetAngle) * deflectLength
+    aimLine.lineStyle(1.5, 0xffdd44, 0.8)
     aimLine.beginPath()
-    aimLine.moveTo(hx, hy)
-    aimLine.lineTo(sde.x, sde.y)
+    aimLine.moveTo(hit.x, hit.y)
+    aimLine.lineTo(tex, tey)
     aimLine.strokePath()
+    drawArrowTip(aimLine, tex, tey, targetAngle, 0xffdd44, 0.8)
 
-    drawArrowTip(aimLine, sde.x, sde.y, smoothDeflectAngle, 0xffdd44, 0.6)
-
+    // White arrow — cue ball path after collision (only show if not dead centre)
+    if (centrality < 0.98) {
+      const cex = ghostX + Math.cos(deflectAngle) * deflectLength * 0.6
+      const cey = ghostY + Math.sin(deflectAngle) * deflectLength * 0.6
+      aimLine.lineStyle(1, 0xffffff, 0.25)
+      aimLine.beginPath()
+      aimLine.moveTo(ghostX, ghostY)
+      aimLine.lineTo(cex, cey)
+      aimLine.strokePath()
+      drawArrowTip(aimLine, cex, cey, deflectAngle, 0xffffff, 0.25)
+    }
   } else {
     const wallPoint = raycastToWall(cx, cy, angle)
     drawDottedLine(aimLine, cx, cy, wallPoint.x, wallPoint.y, 0xffffff, 0.2)
@@ -369,26 +372,52 @@ function getImpactGeometry(cueBall, targetBall, angle) {
 
   const fx = bx - cx
   const fy = by - cy
-  const t  = fx * dx + fy * dy
-  if (t <= 0) return null
+    const t  = fx * dx + fy * dy
+    if (t <= 0) return null
 
-  const closestX = cx + dx * t
-  const closestY = cy + dy * t
-  const offset   = Math.hypot(bx - closestX, by - closestY)
+    const closestX = cx + dx * t
+    const closestY = cy + dy * t
+    const offset   = Math.hypot(bx - closestX, by - closestY)
 
-  const radiusSum   = BALL.radius * 2
-  const radiusSumSq = radiusSum * radiusSum
-  const offsetSq    = offset * offset
+    const radiusSum = BALL.radius * 2
+    if (offset >= radiusSum) return null
 
-  if (offsetSq >= radiusSumSq) return null
+    const backDist = Math.sqrt(radiusSum * radiusSum - offset * offset)
+    const ghostX   = cx + dx * (t - backDist)
+    const ghostY   = cy + dy * (t - backDist)
 
-  const backDist   = Math.sqrt(radiusSumSq - offsetSq)
-  const ghostX     = cx + dx * (t - backDist)
-  const ghostY     = cy + dy * (t - backDist)
-  const deflectAngle = Math.atan2(by - ghostY, bx - ghostX)
-  const centrality = 1 - (offset / radiusSum)
+    // Collision normal — exactly what stepPhysics uses
+    const ndx  = bx - ghostX
+    const ndy  = by - ghostY
+    const ndist = Math.hypot(ndx, ndy) || 1
+    const nx   = ndx / ndist
+    const ny   = ndy / ndist
 
-  return { ghostX, ghostY, deflectAngle, centrality }
+    // Simulate the impulse exactly as stepPhysics does
+    // Use physics restitution constant to match stepPhysics behavior
+    const RESTITUTION = 0.97
+
+    // cue incoming direction (unit)
+    const dot     = dx * nx + dy * ny
+    const impulse = dot * RESTITUTION
+
+    // Cue ball post-collision direction
+    const cueDx = dx - impulse * nx
+    const cueDy = dy - impulse * ny
+
+    // Target ball post-collision direction
+    const tgtDx = impulse * nx
+    const tgtDy = impulse * ny
+
+    const centrality = 1 - (offset / radiusSum)
+
+    return {
+      ghostX,
+      ghostY,
+      deflectAngle: Math.atan2(cueDy, cueDx),
+      targetAngle:  Math.atan2(tgtDy, tgtDx),
+      centrality,
+    }
 }
 
 function getFirstHitBall(scene, cx, cy, angle) {
@@ -601,7 +630,9 @@ function drawAimLineByAngle(scene, angle) {
       drawDottedLine(aimLine, cx, cy, wallPoint.x, wallPoint.y, 0xffffff, 0.2)
       return
     }
-    const { ghostX, ghostY, deflectAngle, centrality } = impact
+    const { ghostX, ghostY, deflectAngle, targetAngle, centrality } = impact
+
+    // Cue path up to ghost ball position
     drawDottedLine(aimLine, cx, cy, ghostX, ghostY, 0xffffff, 0.35)
     aimLine.lineStyle(1, 0xffffff, 0.3)
     aimLine.strokeCircle(ghostX, ghostY, BALL.radius)
@@ -610,21 +641,34 @@ function drawAimLineByAngle(scene, angle) {
     const MAX_DEFLECT   = 140
     const MIN_DEFLECT   = 20
     const deflectLength = MIN_DEFLECT + (MAX_DEFLECT - MIN_DEFLECT) * centrality
-    const hx    = hit.x
-    const hy    = hit.y
-    const rawEx = hx + Math.cos(deflectAngle) * deflectLength
-    const rawEy = hy + Math.sin(deflectAngle) * deflectLength
-    const sde   = smoothDeflectEndpoint({ x: rawEx, y: rawEy })
-    const smoothDeflectAngle = Math.atan2(sde.y - hy, sde.x - hx)
-    aimLine.lineStyle(1.5, 0xffdd44, 0.6)
+
+    // Yellow arrow — target ball direction (physics-accurate)
+    const tex = hit.x + Math.cos(targetAngle) * deflectLength
+    const tey = hit.y + Math.sin(targetAngle) * deflectLength
+    aimLine.lineStyle(1.5, 0xffdd44, 0.8)
     aimLine.beginPath()
-    aimLine.moveTo(hx, hy)
-    aimLine.lineTo(sde.x, sde.y)
+    aimLine.moveTo(hit.x, hit.y)
+    aimLine.lineTo(tex, tey)
     aimLine.strokePath()
-    drawArrowTip(aimLine, sde.x, sde.y, smoothDeflectAngle, 0xffdd44, 0.6)
+    drawArrowTip(aimLine, tex, tey, targetAngle, 0xffdd44, 0.8)
+
+    // White arrow — cue ball path after collision (only show if not dead centre)
+    if (centrality < 0.98) {
+      const cex = ghostX + Math.cos(deflectAngle) * deflectLength * 0.6
+      const cey = ghostY + Math.sin(deflectAngle) * deflectLength * 0.6
+      aimLine.lineStyle(1, 0xffffff, 0.25)
+      aimLine.beginPath()
+      aimLine.moveTo(ghostX, ghostY)
+      aimLine.lineTo(cex, cey)
+      aimLine.strokePath()
+      drawArrowTip(aimLine, cex, cey, deflectAngle, 0xffffff, 0.25)
+    }
   } else {
     const wallPoint = raycastToWall(cx, cy, angle)
     drawDottedLine(aimLine, cx, cy, wallPoint.x, wallPoint.y, 0xffffff, 0.2)
     drawArrowTip(aimLine, wallPoint.x, wallPoint.y, angle, 0xffffff, 0.35)
   }
 }
+
+// Export debug helpers
+export { drawAimLine }
