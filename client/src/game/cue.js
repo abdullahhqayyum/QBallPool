@@ -9,6 +9,10 @@ const MIN_AIM_DISTANCE = 10
 
 const PTR_SMOOTH_ALPHA     = 0.3
 const DEFLECT_SMOOTH_ALPHA = 0.25
+// How much the aim angle drifts per frame while dragging back (0 = frozen, 1 = full tracking)
+const AIM_DRAG_SENSITIVITY = 0.08
+// If the pointer comes within this many px of the cue ball during drag, cancel the shot
+const CANCEL_RADIUS = 20
 let   smoothedPtr          = null
 let   smoothedDeflect      = null
 
@@ -76,7 +80,22 @@ export function setupCue(scene, onShoot) {
 
   let dragStart   = null
   let dragCurrent = null
+  let lockedAngle = null   // aim direction fixed at pointerdown, never changes during drag
   let power       = 0
+
+  const cancelShot = () => {
+    if (!dragStart) return
+    dragStart   = null
+    dragCurrent = null
+    lockedAngle = null
+    power       = 0
+    smoothedPtr = null
+    smoothedDeflect = null
+    aimLine.clear()
+    powerBar.clear()
+    if (pullLine) pullLine.clear()
+    if (scene.game?.canvas) scene.game.canvas.style.cursor = 'crosshair'
+  }
 
   const releaseShot = (gameX, gameY) => {
     if (!dragStart) return
@@ -91,8 +110,10 @@ export function setupCue(scene, onShoot) {
     const shotPoint = releasePoint || rawRelease
     const dist = Math.hypot(shotPoint.x - dragStart.x, shotPoint.y - dragStart.y)
 
+    const firedAngle = lockedAngle  // use the angle locked at pointerdown
     dragStart   = null
     dragCurrent = null
+    lockedAngle = null
 
     aimLine.clear()
     powerBar.clear()
@@ -104,8 +125,7 @@ export function setupCue(scene, onShoot) {
     const cueBall = getCueBall(scene)
     if (!cueBall) return
 
-    const aimPtr = smoothedPtr || shotPoint
-    const angle  = Math.atan2(cueBall.y - aimPtr.y, cueBall.x - aimPtr.x)
+    const angle = firedAngle !== null ? firedAngle : Math.atan2(cueBall.y - shotPoint.y, cueBall.x - shotPoint.x)
 
     scene.registry.set('firstCueContactLabel', null)
     scene.registry.set('shotFired', true)
@@ -117,16 +137,32 @@ export function setupCue(scene, onShoot) {
   const renderDrag = (gameX, gameY) => {
     if (!dragStart) return
     const current = { x: gameX, y: gameY }
-    const dist    = Math.hypot(current.x - dragStart.x, current.y - dragStart.y)
-    power         = Math.min((dist / CUE.dragForMaxPower) * CUE.maxPower, CUE.maxPower)
 
     const cueBall = getCueBall(scene)
     if (!cueBall) return
-    const angle = Math.atan2(cueBall.y - current.y, cueBall.x - current.x)
-    drawAimLine(scene, current)
+
+    // Cancel if pointer comes back close to the cue ball — reliable cancel zone
+    if (Math.hypot(current.x - cueBall.x, current.y - cueBall.y) < CANCEL_RADIUS) {
+      cancelShot()
+      return
+    }
+
+    const dist = Math.hypot(current.x - dragStart.x, current.y - dragStart.y)
+    power      = Math.min((dist / CUE.dragForMaxPower) * CUE.maxPower, CUE.maxPower)
+    // Slowly drift the aim toward where the pointer currently is — feels like
+    // resistance rather than a hard lock. AIM_DRAG_SENSITIVITY controls the speed.
+    if (lockedAngle !== null) {
+      const rawAngle = Math.atan2(cueBall.y - current.y, cueBall.x - current.x)
+      // Angular delta wrapped to [-π, π] so we always take the short arc
+      let delta = rawAngle - lockedAngle
+      if (delta >  Math.PI) delta -= Math.PI * 2
+      if (delta < -Math.PI) delta += Math.PI * 2
+      lockedAngle += delta * AIM_DRAG_SENSITIVITY
+      drawAimLineByAngle(scene, lockedAngle)
+      updateCursor(scene, dragStart, lockedAngle)
+    }
     drawPowerBar(scene, power)
     drawPullLine(scene, dragStart, current, power)
-    updateCursor(scene, current, angle)
   }
 
   // ---- Mouse events on window (catches drags that leave the canvas) --------
@@ -168,6 +204,18 @@ export function setupCue(scene, onShoot) {
   window.addEventListener('touchmove',  handleWindowTouchMove, { passive: false })
   window.addEventListener('touchend',   handleWindowTouchEnd,  { passive: false })
 
+  // ---- Cancel on right-click or Escape ------------------------------------
+  const handleContextMenu = (evt) => {
+    if (!dragStart) return
+    evt.preventDefault()
+    cancelShot()
+  }
+  const handleKeyDown = (evt) => {
+    if (evt.key === 'Escape' && dragStart) cancelShot()
+  }
+  window.addEventListener('contextmenu', handleContextMenu)
+  window.addEventListener('keydown',     handleKeyDown)
+
   // ---- Phaser pointer events (already in game-space) -----------------------
   scene.input.on('pointermove', (ptr) => {
     if (!canShoot(scene)) return
@@ -187,8 +235,13 @@ export function setupCue(scene, onShoot) {
 
   scene.input.on('pointerdown', (ptr) => {
     if (!canShoot(scene)) return
+    const cueBall = getCueBall(scene)
     dragStart   = { x: ptr.x, y: ptr.y }
     dragCurrent = { x: ptr.x, y: ptr.y }
+    // Lock the aim angle right now — it will not change as the player drags back
+    lockedAngle = cueBall
+      ? Math.atan2(cueBall.y - ptr.y, cueBall.x - ptr.x)
+      : null
     power = 0
     smoothedPtr = null; smoothedDeflect = null
   })
@@ -198,10 +251,12 @@ export function setupCue(scene, onShoot) {
   })
 
   const cleanup = () => {
-    window.removeEventListener('mousemove',  handleWindowMouseMove)
-    window.removeEventListener('mouseup',    handleWindowMouseUp)
-    window.removeEventListener('touchmove',  handleWindowTouchMove)
-    window.removeEventListener('touchend',   handleWindowTouchEnd)
+    window.removeEventListener('mousemove',    handleWindowMouseMove)
+    window.removeEventListener('mouseup',      handleWindowMouseUp)
+    window.removeEventListener('touchmove',    handleWindowTouchMove)
+    window.removeEventListener('touchend',     handleWindowTouchEnd)
+    window.removeEventListener('contextmenu',  handleContextMenu)
+    window.removeEventListener('keydown',      handleKeyDown)
   }
   scene.events.once('shutdown', cleanup)
   scene.events.once('destroy',  cleanup)

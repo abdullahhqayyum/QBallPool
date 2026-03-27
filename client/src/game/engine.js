@@ -141,7 +141,11 @@ function sceneCreate(gameState) {
     this.registry.set('oppType', null)
   }
 
-  setupCue(this, (angle, power) => {
+setupCue(this, (angle, power) => {
+  if (typeof this._cueBallPlacementCleanup === 'function') {
+      this._cueBallPlacementCleanup()
+      this._cueBallPlacementCleanup = null
+    }
     if (isOnline) return
   })
 
@@ -473,59 +477,88 @@ function respawnCueBall(scene, onPlaced) {
   const cueBall = balls.find(b => b.label === 'cue')
   if (!cueBall) return
 
-  cueBall.vx = 0
-  cueBall.vy = 0
+  cueBall.vx       = 0
+  cueBall.vy       = 0
+  cueBall.pocketed = false
+  if (cueBall.gfx) cueBall.gfx.setVisible(true)
 
   scene.registry.set('placingCueBall',  true)
   scene.registry.set('shotFired',       false)
   scene.registry.set('ballsWereMoving', false)
-  cueBall.pocketed = false
-  if (cueBall.gfx) cueBall.gfx.setVisible(true)
 
   const clampToTable = (x, y) => ({
     x: Math.max(TABLE.playX1 + BALL.radius, Math.min(TABLE.playX2 - BALL.radius, x)),
     y: Math.max(TABLE.playY1 + BALL.radius, Math.min(TABLE.playY2 - BALL.radius, y)),
   })
 
-  let previewPos = { x: TABLE.width * 0.25, y: TABLE.height * 0.5 }
-  cueBall.x = previewPos.x
-  cueBall.y = previewPos.y
-  if (cueBall.gfx) cueBall.gfx.setPosition(previewPos.x, previewPos.y)
+  cueBall.x = TABLE.width * 0.25
+  cueBall.y = TABLE.height * 0.5
+  if (cueBall.gfx) cueBall.gfx.setPosition(cueBall.x, cueBall.y)
+
+  let dragging     = false
+  let lastValidPos = { x: cueBall.x, y: cueBall.y }
+
+  const updateTint = (valid) => {
+    if (cueBall.gfx) cueBall.gfx.setAlpha(valid ? 1 : 0.45)
+  }
+
+  const cleanup = () => {
+    scene.input.off('pointerdown', downHandler)
+    scene.input.off('pointermove', moveHandler)
+    scene.input.off('pointerup',   upHandler)
+    if (cueBall.gfx) cueBall.gfx.setAlpha(1)
+  }
+
+  const downHandler = (ptr) => {
+    if (Math.hypot(ptr.x - cueBall.x, ptr.y - cueBall.y) > BALL.radius * 3) return
+    dragging = true
+    // Block shooting while actively dragging
+    scene.registry.set('placingCueBall', true)
+  }
 
   const moveHandler = (ptr) => {
-    // ptr.x / ptr.y are already in game-space because Phaser applies the
-    // canvas CSS scale to pointer events internally via ScaleManager
-    previewPos = clampToTable(ptr.x, ptr.y)
-    cueBall.x  = previewPos.x
-    cueBall.y  = previewPos.y
-    if (cueBall.gfx) cueBall.gfx.setPosition(previewPos.x, previewPos.y)
-  }
-
-  const placeHandler = (ptr) => {
+    if (!dragging) return
     const pos = clampToTable(ptr.x, ptr.y)
-    if (!isValidCuePlacement(scene, cueBall, pos.x, pos.y)) return
-
     cueBall.x = pos.x
     cueBall.y = pos.y
-    cueBall.vx = 0
-    cueBall.vy = 0
-    cueBall.pocketed = false
     if (cueBall.gfx) cueBall.gfx.setPosition(pos.x, pos.y)
-
-    scene.registry.set('placingCueBall',  false)
-    scene.registry.set('shotFired',       false)
-    scene.registry.set('ballsWereMoving', false)
-
-    scene.input.off('pointermove', moveHandler)
-    scene.input.off('pointerdown', placeHandler)
-
-    if (typeof onPlaced === 'function') onPlaced()
+    updateTint(isValidCuePlacement(scene, cueBall, pos.x, pos.y))
   }
 
-  scene.input.on('pointermove', moveHandler)
-  scene.input.on('pointerdown', placeHandler)
-}
+  const upHandler = (ptr) => {
+    if (!dragging) return
+    dragging = false
 
+    const pos   = clampToTable(ptr.x, ptr.y)
+    const valid = isValidCuePlacement(scene, cueBall, pos.x, pos.y)
+
+    if (valid) {
+      cueBall.x = pos.x
+      cueBall.y = pos.y
+      cueBall.vx = 0
+      cueBall.vy = 0
+      if (cueBall.gfx) cueBall.gfx.setPosition(pos.x, pos.y)
+      lastValidPos = { x: pos.x, y: pos.y }
+      updateTint(true)
+      // Release placement lock — cue events re-enable so player can aim and shoot
+      scene.registry.set('placingCueBall', false)
+    } else {
+      // Snap back to last valid spot
+      cueBall.x = lastValidPos.x
+      cueBall.y = lastValidPos.y
+      if (cueBall.gfx) cueBall.gfx.setPosition(lastValidPos.x, lastValidPos.y)
+      updateTint(true)
+      scene.registry.set('placingCueBall', false)
+    }
+  }
+
+  scene.input.on('pointerdown', downHandler)
+  scene.input.on('pointermove', moveHandler)
+  scene.input.on('pointerup',   upHandler)
+
+  // Called by the shoot flow — tear down drag handlers after the shot fires
+  scene._cueBallPlacementCleanup = cleanup
+}
 // ---------------------------------------------------------------------------
 // First contact tracking
 // ---------------------------------------------------------------------------
