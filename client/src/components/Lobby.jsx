@@ -76,7 +76,7 @@ export default function Lobby({ onStart, user }) {
       {mode === 'online' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: 280 }}>
           <input
-            placeholder="Room ID (leave blank for new room)"
+            placeholder="Room ID (can enter anything, should be same for both players)"
             value={roomId}
             onChange={e => setRoomId(e.target.value)}
             style={{
