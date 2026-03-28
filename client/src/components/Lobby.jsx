@@ -76,7 +76,7 @@ export default function Lobby({ onStart, user }) {
       {mode === 'online' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: 280 }}>
           <input
-            placeholder="Room ID (can enter anything, should be same for both players)"
+            placeholder="Room ID"
             value={roomId}
             onChange={e => setRoomId(e.target.value)}
             style={{
@@ -90,6 +90,10 @@ export default function Lobby({ onStart, user }) {
               outline:      'none',
             }}
           />
+
+          <div style={{ color: '#777', fontSize: 11, marginTop: 6 }}>
+            Can enter anything — should be the same for both players.
+          </div>
         </div>
       )}
 
