@@ -1,24 +1,72 @@
-import { useGameStore } from "../store/gameStore"
+import React from 'react'
+import { POCKET } from '../game/constants'
+import { TABLE } from '../game/constants'
 
-export default function PocketCallModal() {
-  const selectingPocket = useGameStore((s) => s.selectingPocket)
+const POCKET_LABELS = ['TL', 'TM', 'TR', 'BL', 'BM', 'BR']
 
-  if (!selectingPocket) return null
+export default function PocketCallModal({ onCall, canvasRect }) {
+  if (!canvasRect) return null
+
+  const scaleX = canvasRect.width  / TABLE.width
+  const scaleY = canvasRect.height / TABLE.height
 
   return (
-    <div style={{
-      position: "absolute",
-      top: 20,
-      left: "50%",
-      transform: "translateX(-50%)",
-      background: "rgba(0,0,0,0.7)",
-      color: "white",
-      padding: "10px 16px",
-      borderRadius: "8px",
-      fontSize: "14px",
-      pointerEvents: "none"
-    }}>
-      Tap a red pocket to call it for the 8-ball
-    </div>
+    <>
+      {/* Instruction banner */}
+      <div style={{
+        position:   'absolute',
+        top:        canvasRect.top + 12,
+        left:       '50%',
+        transform:  'translateX(-50%)',
+        background: 'rgba(0,0,0,0.75)',
+        color:      'white',
+        padding:    '8px 16px',
+        borderRadius: 8,
+        fontSize:   13,
+        fontFamily: 'monospace',
+        pointerEvents: 'none',
+        zIndex:     100,
+        whiteSpace: 'nowrap',
+      }}>
+        🎱 Call your pocket for the 8-ball
+      </div>
+
+      {/* Clickable pocket targets — positioned over the canvas */}
+      {POCKET.positions.map(([px, py], i) => {
+        const cssX = canvasRect.left + px * scaleX
+        const cssY = canvasRect.top  + py * scaleY
+        return (
+          <div
+            key={i}
+            onClick={() => onCall(i)}
+            style={{
+              position:     'fixed',
+              left:         cssX - 22,
+              top:          cssY - 22,
+              width:        44,
+              height:       44,
+              borderRadius: '50%',
+              background:   'rgba(255,30,30,0.55)',
+              border:       '2px solid #ff4444',
+              cursor:       'pointer',
+              zIndex:       99,
+              display:      'flex',
+              alignItems:   'center',
+              justifyContent: 'center',
+              color:        '#fff',
+              fontSize:     9,
+              fontFamily:   'monospace',
+              fontWeight:   'bold',
+              boxShadow:    '0 0 10px rgba(255,0,0,0.6)',
+              transition:   'background 0.15s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,80,80,0.85)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,30,30,0.55)'}
+          >
+            {POCKET_LABELS[i]}
+          </div>
+        )
+      })}
+    </>
   )
 }

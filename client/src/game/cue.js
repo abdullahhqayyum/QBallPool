@@ -28,17 +28,6 @@ function smoothPointer(raw) {
   return smoothedPtr
 }
 
-function smoothDeflectEndpoint(raw) {
-  if (!smoothedDeflect) {
-    smoothedDeflect = { x: raw.x, y: raw.y }
-  } else {
-    smoothedDeflect = {
-      x: smoothedDeflect.x + (raw.x - smoothedDeflect.x) * DEFLECT_SMOOTH_ALPHA,
-      y: smoothedDeflect.y + (raw.y - smoothedDeflect.y) * DEFLECT_SMOOTH_ALPHA,
-    }
-  }
-  return smoothedDeflect
-}
 
 function stabilizePointer(previous, next) {
   if (!next) return previous || null
@@ -313,44 +302,48 @@ function drawAimLine(scene, ptr) {
   const hit = getFirstHitBall(scene, cx, cy, angle)
 
   if (hit) {
-    const impact = getImpactGeometry(cueBall, hit, angle)
+    const impact  = getImpactGeometry(cueBall, hit, angle)
+    const illegal = isIllegalTarget(scene, hit)
+
     if (!impact) {
       const wallPoint = raycastToWall(cx, cy, angle)
-      drawDottedLine(aimLine, cx, cy, wallPoint.x, wallPoint.y, 0xffffff, 0.2)
+      drawDottedLine(aimLine, cx, cy, wallPoint.x, wallPoint.y, illegal ? 0xff3333 : 0xffffff, 0.2)
       return
     }
     const { ghostX, ghostY, deflectAngle, targetAngle, centrality } = impact
 
     // Cue path up to ghost ball position
-    drawDottedLine(aimLine, cx, cy, ghostX, ghostY, 0xffffff, 0.35)
-    aimLine.lineStyle(1, 0xffffff, 0.3)
+    const lineColor = illegal ? 0xff3333 : 0xffffff
+    drawDottedLine(aimLine, cx, cy, ghostX, ghostY, lineColor, 0.35)
+    aimLine.lineStyle(1, lineColor, 0.3)
     aimLine.strokeCircle(ghostX, ghostY, BALL.radius)
-    drawArrowTip(aimLine, ghostX, ghostY, angle, 0xffffff, 0.35)
+    drawArrowTip(aimLine, ghostX, ghostY, angle, lineColor, 0.35)
 
-    const MAX_DEFLECT   = 140
-    const MIN_DEFLECT   = 20
-    const deflectLength = MIN_DEFLECT + (MAX_DEFLECT - MIN_DEFLECT) * centrality
+    // Yellow arrow — skip entirely if illegal, shorter length
+    if (!illegal) {
+      const MAX_DEFLECT   = 80
+      const MIN_DEFLECT   = 14
+      const deflectLength = MIN_DEFLECT + (MAX_DEFLECT - MIN_DEFLECT) * centrality
 
-    // Yellow arrow — target ball direction (physics-accurate)
-    const tex = hit.x + Math.cos(targetAngle) * deflectLength
-    const tey = hit.y + Math.sin(targetAngle) * deflectLength
-    aimLine.lineStyle(1.5, 0xffdd44, 0.8)
-    aimLine.beginPath()
-    aimLine.moveTo(hit.x, hit.y)
-    aimLine.lineTo(tex, tey)
-    aimLine.strokePath()
-    drawArrowTip(aimLine, tex, tey, targetAngle, 0xffdd44, 0.8)
-
-    // White arrow — cue ball path after collision (only show if not dead centre)
-    if (centrality < 0.98) {
-      const cex = ghostX + Math.cos(deflectAngle) * deflectLength * 0.6
-      const cey = ghostY + Math.sin(deflectAngle) * deflectLength * 0.6
-      aimLine.lineStyle(1, 0xffffff, 0.25)
+      const tex = hit.x + Math.cos(targetAngle) * deflectLength
+      const tey = hit.y + Math.sin(targetAngle) * deflectLength
+      aimLine.lineStyle(1.5, 0xffdd44, 0.8)
       aimLine.beginPath()
-      aimLine.moveTo(ghostX, ghostY)
-      aimLine.lineTo(cex, cey)
+      aimLine.moveTo(hit.x, hit.y)
+      aimLine.lineTo(tex, tey)
       aimLine.strokePath()
-      drawArrowTip(aimLine, cex, cey, deflectAngle, 0xffffff, 0.25)
+      drawArrowTip(aimLine, tex, tey, targetAngle, 0xffdd44, 0.8)
+
+      if (centrality < 0.98) {
+        const cex = ghostX + Math.cos(deflectAngle) * deflectLength * 0.6
+        const cey = ghostY + Math.sin(deflectAngle) * deflectLength * 0.6
+        aimLine.lineStyle(1, 0xffffff, 0.25)
+        aimLine.beginPath()
+        aimLine.moveTo(ghostX, ghostY)
+        aimLine.lineTo(cex, cey)
+        aimLine.strokePath()
+        drawArrowTip(aimLine, cex, cey, deflectAngle, 0xffffff, 0.25)
+      }
     }
   } else {
     const wallPoint = raycastToWall(cx, cy, angle)
@@ -605,6 +598,29 @@ function areMyBallsDone(scene) {
   return balls.filter(b => b.type === myType).every(b => b.pocketed)
 }
 
+function isIllegalTarget(scene, hit) {
+  if (!hit) return false
+  const myType  = scene.registry.get('myType')
+  if (!myType) return false
+  const myTurn  = scene.registry.get('myTurn')
+  const oppType = scene.registry.get('oppType')
+
+  // Type assigned to the current shooter
+  const shooterType = myTurn ? myType : oppType
+
+  if (hit.type === '8ball') {
+    // 8-ball is legal only if the current shooter has cleared all their balls
+    const balls        = scene.registry.get('balls') || []
+    const shooterBalls = balls.filter(b => b.type === shooterType)
+    const allCleared   = shooterBalls.length > 0 && shooterBalls.every(b => b.pocketed)
+    return !allCleared
+  }
+
+  // Opponent's ball type is illegal for the current shooter
+  const opponentType = myTurn ? oppType : myType
+  return hit.type === opponentType
+}
+
 function drawAimLineByAngle(scene, angle) {
   const cueBall = getCueBall(scene)
   if (!cueBall || !aimLine) return
@@ -624,44 +640,48 @@ function drawAimLineByAngle(scene, angle) {
   const hit = getFirstHitBall(scene, cx, cy, angle)
 
   if (hit) {
-    const impact = getImpactGeometry(cueBall, hit, angle)
+    const impact  = getImpactGeometry(cueBall, hit, angle)
+    const illegal = isIllegalTarget(scene, hit)
+
     if (!impact) {
       const wallPoint = raycastToWall(cx, cy, angle)
-      drawDottedLine(aimLine, cx, cy, wallPoint.x, wallPoint.y, 0xffffff, 0.2)
+      drawDottedLine(aimLine, cx, cy, wallPoint.x, wallPoint.y, illegal ? 0xff3333 : 0xffffff, 0.2)
       return
     }
     const { ghostX, ghostY, deflectAngle, targetAngle, centrality } = impact
 
-    // Cue path up to ghost ball position
-    drawDottedLine(aimLine, cx, cy, ghostX, ghostY, 0xffffff, 0.35)
-    aimLine.lineStyle(1, 0xffffff, 0.3)
+    // Aim line to ghost — red if illegal
+    const lineColor = illegal ? 0xff3333 : 0xffffff
+    drawDottedLine(aimLine, cx, cy, ghostX, ghostY, lineColor, 0.35)
+    aimLine.lineStyle(1, lineColor, 0.3)
     aimLine.strokeCircle(ghostX, ghostY, BALL.radius)
-    drawArrowTip(aimLine, ghostX, ghostY, angle, 0xffffff, 0.35)
+    drawArrowTip(aimLine, ghostX, ghostY, angle, lineColor, 0.35)
 
-    const MAX_DEFLECT   = 140
-    const MIN_DEFLECT   = 20
-    const deflectLength = MIN_DEFLECT + (MAX_DEFLECT - MIN_DEFLECT) * centrality
+    // Yellow arrow — skip entirely if illegal, shorter length
+    if (!illegal) {
+      const MAX_DEFLECT   = 80   // shortened from 140
+      const MIN_DEFLECT   = 14   // shortened from 20
+      const deflectLength = MIN_DEFLECT + (MAX_DEFLECT - MIN_DEFLECT) * centrality
 
-    // Yellow arrow — target ball direction (physics-accurate)
-    const tex = hit.x + Math.cos(targetAngle) * deflectLength
-    const tey = hit.y + Math.sin(targetAngle) * deflectLength
-    aimLine.lineStyle(1.5, 0xffdd44, 0.8)
-    aimLine.beginPath()
-    aimLine.moveTo(hit.x, hit.y)
-    aimLine.lineTo(tex, tey)
-    aimLine.strokePath()
-    drawArrowTip(aimLine, tex, tey, targetAngle, 0xffdd44, 0.8)
-
-    // White arrow — cue ball path after collision (only show if not dead centre)
-    if (centrality < 0.98) {
-      const cex = ghostX + Math.cos(deflectAngle) * deflectLength * 0.6
-      const cey = ghostY + Math.sin(deflectAngle) * deflectLength * 0.6
-      aimLine.lineStyle(1, 0xffffff, 0.25)
+      const tex = hit.x + Math.cos(targetAngle) * deflectLength
+      const tey = hit.y + Math.sin(targetAngle) * deflectLength
+      aimLine.lineStyle(1.5, 0xffdd44, 0.8)
       aimLine.beginPath()
-      aimLine.moveTo(ghostX, ghostY)
-      aimLine.lineTo(cex, cey)
+      aimLine.moveTo(hit.x, hit.y)
+      aimLine.lineTo(tex, tey)
       aimLine.strokePath()
-      drawArrowTip(aimLine, cex, cey, deflectAngle, 0xffffff, 0.25)
+      drawArrowTip(aimLine, tex, tey, targetAngle, 0xffdd44, 0.8)
+
+      if (centrality < 0.98) {
+        const cex = ghostX + Math.cos(deflectAngle) * deflectLength * 0.6
+        const cey = ghostY + Math.sin(deflectAngle) * deflectLength * 0.6
+        aimLine.lineStyle(1, 0xffffff, 0.25)
+        aimLine.beginPath()
+        aimLine.moveTo(ghostX, ghostY)
+        aimLine.lineTo(cex, cey)
+        aimLine.strokePath()
+        drawArrowTip(aimLine, cex, cey, deflectAngle, 0xffffff, 0.25)
+      }
     }
   } else {
     const wallPoint = raycastToWall(cx, cy, angle)

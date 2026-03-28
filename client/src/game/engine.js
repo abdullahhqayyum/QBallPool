@@ -3,6 +3,8 @@ import { createBalls, rehydrateBalls, syncBallGraphics, areBallsMoving, getBallS
 import { stepPhysics, drawTable, checkPockets } from './physics'
 import { setupCue, resetCue, shootCue, predictCueFirstContact } from './cue'
 import { TABLE, BALL, POCKET } from './constants'
+import { useGameStore } from '../store/gameStore'
+
 
 let onGameOverCb = null
 let onTurnEndCb  = null
@@ -106,6 +108,8 @@ function sceneCreate(gameState) {
 
   if (isRejoin && game?.ball_state) {
     rehydrateBalls(this, game.ball_state)
+  } else if (typeof window !== 'undefined' && window.location?.search?.includes('testrack=1')) {
+    createTestRack(this)
   } else {
     createBalls(this)
   }
@@ -133,12 +137,20 @@ function sceneCreate(gameState) {
   )
   this.registry.set('wrongFirstContact', false)
 
+  this.registry.set('pendingResult', null)
+
   if (isRejoin && game?.my_type) {
     this.registry.set('myType',  game.my_type)
     this.registry.set('oppType', game.my_type === 'solid' ? 'stripe' : 'solid')
   } else {
     this.registry.set('myType',  null)
     this.registry.set('oppType', null)
+  }
+
+  // If ?testrack=1 is present, force types so pot/foul rules are active
+  if (typeof window !== 'undefined' && window.location?.search?.includes('testrack=1')) {
+    this.registry.set('myType',  'solid')
+    this.registry.set('oppType', 'stripe')
   }
 
 setupCue(this, (angle, power) => {
@@ -226,6 +238,16 @@ function sceneUpdate() {
 
     this.registry.set('ballsWereMoving', false)
     this.registry.set('shotFired',       false)
+
+    // 8-ball was pocketed this shot — resolve immediately, skip turn-end foul logic
+    const pending = this.registry.get('pendingResult')
+    if (pending) {
+      this.registry.set('pendingResult', null)
+      this.registry.set('gameResult', pending)
+      if (onGameOverCb) onGameOverCb(pending)
+      return
+    }
+
     handleTurnEnd(this)
     return
   }
@@ -249,35 +271,38 @@ function handlePocket(scene, ball) {
   if (ball.type === 'cue') return
 
   if (ball.type === '8ball') {
-    const myType = scene.registry.get('myType')
-    const balls  = scene.registry.get('balls') || []
-    const myTurn = scene.registry.get('myTurn')
+    const myType  = scene.registry.get('myType')
+    const balls   = scene.registry.get('balls') || []
+    const myTurn  = scene.registry.get('myTurn')
+    const oppType = myType === 'solid' ? 'stripe' : 'solid'
 
     if (!myType) {
-      scene.registry.set('gameResult', 'loss')
-      if (onGameOverCb) onGameOverCb('loss')
+      scene.registry.set('pendingResult', 'loss')
       return
     }
 
-    const myBalls    = balls.filter(b => b.type === myType)
-    const allCleared = myBalls.every(b => b.pocketed)
+    const actualPocketIdx = POCKET.positions.reduce((best, [px, py], i) => {
+      const d = Math.hypot(ball.x - px, ball.y - py)
+      return d < best.d ? { i, d } : best
+    }, { i: -1, d: Infinity }).i
 
-    if (myTurn && allCleared) {
-      const calledPocket = scene.registry.get('calledPocket')
-      if (calledPocket === null || calledPocket === undefined) {
-        scene.registry.set('gameResult', 'loss')
-        if (onGameOverCb) onGameOverCb('loss')
-        return
-      }
-      const pocketPos = POCKET.positions[calledPocket]
-      const dist = Math.hypot(ball.x - pocketPos[0], ball.y - pocketPos[1])
-      const result = dist < 60 ? 'win' : 'loss'
-      scene.registry.set('gameResult', result)
-      if (onGameOverCb) onGameOverCb(result)
-    } else {
-      scene.registry.set('gameResult', myTurn ? 'loss' : 'win')
-      if (onGameOverCb) onGameOverCb(myTurn ? 'loss' : 'win')
+    const shooterType  = myTurn ? myType : oppType
+    const shooterBalls = balls.filter(b => b.type === shooterType)
+    const allCleared   = shooterBalls.every(b => b.pocketed)
+
+    if (!allCleared) {
+      scene.registry.set('pendingResult', myTurn ? 'loss' : 'win')
+      return
     }
+
+    const calledPocket = scene.registry.get('calledPocket')
+    if (calledPocket === null || calledPocket === undefined) {
+      scene.registry.set('pendingResult', myTurn ? 'loss' : 'win')
+      return
+    }
+
+    const result = actualPocketIdx === calledPocket ? 'win' : 'loss'
+    scene.registry.set('pendingResult', myTurn ? result : (result === 'win' ? 'loss' : 'win'))
   }
 }
 
@@ -286,16 +311,10 @@ function handlePocket(scene, ball) {
 // ---------------------------------------------------------------------------
 function handleTurnEnd(scene) {
   scene.registry.set('foul', false)
-
-  console.log('[TURN END INPUT]', {
-    myTurn:               scene.registry.get('myTurn'),
-    myType:               scene.registry.get('myType'),
-    oppType:              scene.registry.get('oppType'),
-    firstContactMade:     scene.registry.get('firstContactMade'),
-    railHitAfterContact:  scene.registry.get('railHitAfterContact'),
-    firstCueContactLabel: scene.registry.get('firstCueContactLabel'),
-    pocketed:             (scene.registry.get('pocketedThisTurn') || []).map(b => b.label),
-  })
+  // Clear any previous called pocket at the start of a new turn
+  scene.registry.set('calledPocket', null)
+  useGameStore.setCalledPocket(null)
+  useGameStore.setSelectingPocket(false)
 
   const pocketedThisTurn     = scene.registry.get('pocketedThisTurn') || []
   const firstContactMade     = scene.registry.get('firstContactMade')
@@ -412,6 +431,19 @@ function handleTurnEnd(scene) {
     ? objectBalls.filter(b => b.type === finalExpectedType)
     : objectBalls.filter(b => b.type === 'solid' || b.type === 'stripe')
 
+  // ── Check if all my balls are now cleared — prompt pocket call for 8-ball ──
+  if (finalMine && finalMyType) {
+    const allBalls   = scene.registry.get('balls') || []
+    const myRemaining = allBalls.filter(b => b.type === finalMyType && !b.pocketed)
+    if (myRemaining.length === 0) {
+      // Last ball just went in — open pocket selector, block shooting until chosen
+      useGameStore.setSelectingPocket(true)
+      useGameStore.setCalledPocket(null)
+      scene.registry.set('calledPocket', null)
+    }
+  }
+  // ── end pocket call ──
+
   if (myBallsIn.length > 0) {
     notify(scene, { switched: false, foul: false, assignedType })
   } else {
@@ -419,7 +451,6 @@ function handleTurnEnd(scene) {
     notify(scene, { switched: true, foul: false, assignedType })
   }
 }
-
 function switchTurn(scene) {
   scene.registry.set('myTurn', !scene.registry.get('myTurn'))
 }
@@ -640,4 +671,45 @@ function finalizeDiagnosticShot(scene) {
   diag.index += 1
   scene.registry.set('__collisionDiag', diag)
   console.log(`[DIAG] shot=${active.name} predicted=${active.predictedKind}:${active.predictedLabel} actual=${actualKind}:${actualLabel} match=${match}`)
+}
+
+function createTestRack(scene) {
+  // Minimal rack: 1 solid, 1 stripe, 1 eight ball — easy to test all pot rules
+  const balls = [
+    { label: 'cue',    type: 'cue',    x: 200, y: 200, vx: 0, vy: 0, pocketed: false },
+    { label: 'solid1', type: 'solid',  x: 500, y: 160, vx: 0, vy: 0, pocketed: false },
+    { label: 'stripe1',type: 'stripe', x: 500, y: 240, vx: 0, vy: 0, pocketed: false },
+    { label: '8',      type: '8ball',  x: 580, y: 200, vx: 0, vy: 0, pocketed: false },
+  ]
+
+  // Give each ball a Phaser graphics object same way createBalls does
+  balls.forEach(b => {
+    const gfx = scene.add.graphics()
+    const color = b.type === 'cue'    ? 0xffffff
+                : b.type === 'solid'  ? 0xe05c00
+                : b.type === 'stripe' ? 0x0055ff
+                :                       0x111111
+    gfx.fillStyle(color, 1)
+    gfx.fillCircle(0, 0, BALL.radius)
+    if (b.type === 'stripe') {
+      // White stripe band
+      gfx.fillStyle(0xffffff, 1)
+      gfx.fillRect(-BALL.radius, -4, BALL.radius * 2, 8)
+      gfx.fillStyle(0x0055ff, 1)
+      gfx.fillCircle(0, 0, BALL.radius * 0.55)
+    }
+    if (b.type === '8ball') {
+      gfx.fillStyle(0xffffff, 1)
+      gfx.fillCircle(0, 0, BALL.radius * 0.38)
+    }
+    gfx.x = b.x
+    gfx.y = b.y
+    b.gfx = gfx
+  })
+
+  scene.registry.set('balls', balls)
+
+  // Pre-assign types so pot rules are active immediately — no break needed
+  scene.registry.set('myType',  'solid')
+  scene.registry.set('oppType', 'stripe')
 }

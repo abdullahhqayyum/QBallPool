@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { useGameStore } from '../store/gameStore'
 import { initEngine, destroyEngine } from '../game/engine'
 import MatchResult from './MatchResult'
 import PocketCallModal from './PocketCallModal'
@@ -38,6 +39,7 @@ function getScale(windowWidth) {
 export default function GameCanvas({ gameState, onGameOver }) {
   const containerRef = useRef(null)
   const gameRef      = useRef(null)
+  const canvasRectRef = useRef(null)
 
   const [myTurn,   setMyTurn]   = useState(true)
   const [myType,   setMyType]   = useState(null)
@@ -91,6 +93,9 @@ export default function GameCanvas({ gameState, onGameOver }) {
             }).eq('id', gameState.game.id)
           })
         }
+        // Clear any called-pocket/react state on turn end so HUD resets
+        setCalledPocket(null)
+        setNeedsPocketCall(false)
       },
       (ball) => {
         setPocketed(prev => [...prev, ball.label])
@@ -118,6 +123,10 @@ export default function GameCanvas({ gameState, onGameOver }) {
     }
 
     const syncInterval = setInterval(() => {
+      // Track canvas position for pocket overlay
+      const canvas = gameRef.current?.canvas
+      if (canvas) canvasRectRef.current = canvas.getBoundingClientRect()
+
       const scene = gameRef.current?.scene?.scenes?.[0]
       if (!scene) return
 
@@ -146,12 +155,24 @@ export default function GameCanvas({ gameState, onGameOver }) {
         .filter(b => b?.pocketed).map(b => b.label)
       setPocketed(pocketedLabels)
 
-      const mt        = scene.registry.get('myType')
-      const isMine    = scene.registry.get('myTurn')
-      const myBalls   = balls.filter(b => b.type === mt)
-      const allDone   = mt && myBalls.every(b => b.pocketed)
-      const eightLeft = balls.find(b => b.type === '8ball' && !b.pocketed)
-      if (allDone && eightLeft && isMine && !calledPocket) setNeedsPocketCall(true)
+      const mt       = scene.registry.get('myType')
+      const oppType  = mt === 'solid' ? 'stripe' : mt === 'stripe' ? 'solid' : null
+      const isMine   = !!scene.registry.get('myTurn')
+      const allBalls = scene.registry.get('balls') || []
+
+      // Check if the CURRENT shooter's balls are all done
+      const shooterType = isMine ? mt : oppType
+      const shooterBalls = shooterType ? allBalls.filter(b => b.type === shooterType) : []
+      const allDone      = shooterBalls.length > 0 && shooterBalls.every(b => b.pocketed)
+      const eightLeft    = allBalls.some(b => b.type === '8ball' && !b.pocketed)
+      const alreadyCalled = scene.registry.get('calledPocket') !== null &&
+                            scene.registry.get('calledPocket') !== undefined
+
+      if (allDone && eightLeft && !alreadyCalled) {
+        setNeedsPocketCall(true)
+      } else if (alreadyCalled || !eightLeft) {
+        setNeedsPocketCall(false)
+      }
     }, 300)
 
     return () => {
@@ -164,10 +185,13 @@ export default function GameCanvas({ gameState, onGameOver }) {
   }, [])
 
   function handlePocketCall(pocketIndex) {
-    setNeedsPocketCall(false)
-    setCalledPocket(pocketIndex)
     const scene = gameRef.current?.scene?.scenes?.[0]
+    // Write to registry FIRST so syncInterval sees it immediately on next tick
     if (scene) scene.registry.set('calledPocket', pocketIndex)
+    useGameStore.setSelectingPocket(false)
+    useGameStore.setCalledPocket(pocketIndex)
+    setCalledPocket(pocketIndex)
+    setNeedsPocketCall(false)
   }
 
   if (result) {
@@ -239,7 +263,7 @@ export default function GameCanvas({ gameState, onGameOver }) {
             boxSizing:      'border-box',
           }}>
             <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: 11, fontFamily: 'monospace' }}>
-              BALL IN HAND — TAP TO PLACE CUE
+              BALL IN HAND — DRAG TO PLACE CUE
             </span>
           </div>
         )}
@@ -347,7 +371,12 @@ export default function GameCanvas({ gameState, onGameOver }) {
         </div>
       </div>
 
-      {needsPocketCall && <PocketCallModal onCall={handlePocketCall} />}
+      {needsPocketCall && (
+        <PocketCallModal
+          onCall={handlePocketCall}
+          canvasRect={canvasRectRef.current}
+        />
+      )}
     </div>
   )
 }
