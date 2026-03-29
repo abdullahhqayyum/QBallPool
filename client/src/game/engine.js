@@ -27,13 +27,12 @@ export function getCanvasScale(game) {
 }
 
 // Compute the CSS width we want the canvas to occupy.
-// Leaves 8 px of breathing room on each side for phones.
 function computeCssWidth() {
-  const maxByWidth  = Math.min(window.innerWidth - 8, TABLE.width)
-  // In landscape the URL bar eats height — fit the table vertically too
-  const aspect      = TABLE.height / TABLE.width          // e.g. 0.5625
-  const maxByHeight = Math.floor((window.innerHeight - 80) / aspect) // 80px for HUD + breathing room
-  return Math.min(maxByWidth, maxByHeight)
+  const padding = Math.min(16, window.innerWidth * 0.02)
+  const HUD_H   = 62  // px reserved for HUD below canvas
+  const maxByW  = window.innerWidth - padding * 2
+  const maxByH  = Math.floor((window.innerHeight - HUD_H - padding * 2) / (TABLE.height / TABLE.width))
+  return Math.min(maxByW, maxByH)
 }
 export function initEngine(containerId, gameState, onGameOver, onTurnEnd, onPocket) {
   onGameOverCb = onGameOver
@@ -62,14 +61,18 @@ export function initEngine(containerId, gameState, onGameOver, onTurnEnd, onPock
   const applyScale = () => {
     const canvas = game.canvas
     if (!canvas) return
-    const cssW = computeCssWidth()
-    const cssH = Math.round(cssW * (TABLE.height / TABLE.width))
-    canvas.style.width      = cssW + 'px'
-    canvas.style.height     = cssH + 'px'
-    canvas.style.display    = 'block'
-    canvas.style.margin     = '0 auto'
-    canvas.style.border     = 'none'
-    canvas.style.outline    = 'none'
+    const padding = Math.min(16, window.innerWidth * 0.02)
+    const HUD_H   = 62
+    const maxByW  = window.innerWidth - padding * 2
+    const maxByH  = Math.floor((window.innerHeight - HUD_H - padding * 2) / (TABLE.height / TABLE.width))
+    const cssW    = Math.min(maxByW, maxByH)
+    const cssH    = Math.round(cssW * (TABLE.height / TABLE.width))
+    canvas.style.width       = cssW + 'px'
+    canvas.style.height      = cssH + 'px'
+    canvas.style.display     = 'block'
+    canvas.style.margin      = `${padding}px auto 0`
+    canvas.style.border      = 'none'
+    canvas.style.outline     = 'none'
     canvas.style.touchAction = 'none'
   }
 
