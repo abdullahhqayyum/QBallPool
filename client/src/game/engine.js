@@ -116,8 +116,6 @@ function sceneCreate(gameState) {
     createTestRack(this)
   } else {
     createBalls(this)
-    // Allow player to place cue ball in kitchen before the opening break
-    respawnCueBall(this, null, true)
   }
 
   const myTurn = isOnline
@@ -163,6 +161,17 @@ function sceneCreate(gameState) {
   if (typeof window !== 'undefined' && window.location?.search?.includes('testrack=1')) {
     this.registry.set('myType',  'solid')
     this.registry.set('oppType', 'stripe')
+  }
+
+  // Decide if AI should go first (coin flip) and respawn cue ball AFTER registry state is set
+  const aiGoesFirst = gameState?.mode === 'ai' && Math.random() < 0.5
+  if (aiGoesFirst) {
+    this.registry.set('myTurn', false)
+  }
+
+  if (!isRejoin && !(typeof window !== 'undefined' && window.location?.search?.includes('testrack=1'))) {
+    // Allow player (or AI) to place cue ball in kitchen before the opening break
+    respawnCueBall(this, null, true)
   }
 
 setupCue(this, (angle, power) => {
