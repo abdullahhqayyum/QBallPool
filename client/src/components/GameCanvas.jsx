@@ -47,6 +47,8 @@ export default function GameCanvas({ gameState, onGameOver }) {
   const [foul,     setFoul]     = useState(false)
   const [result,   setResult]   = useState(null)
 
+  const [canvasWidth, setCanvasWidth] = useState(window.innerWidth)
+
   const [needsPocketCall,      setNeedsPocketCall]      = useState(false)
   const [placingCueBall,       setPlacingCueBall]       = useState(false)
   const [calledPocket,         setCalledPocket]         = useState(null)
@@ -54,11 +56,8 @@ export default function GameCanvas({ gameState, onGameOver }) {
   const [waitingForOpponent,   setWaitingForOpponent]   = useState(false)
 
   const { w: windowWidth, h: windowHeight } = useWindowSize()
-  const maxByWidth  = Math.min(windowWidth - 8, TABLE_W)
-  const maxByHeight = Math.floor((windowHeight - 80) / (TABLE_H / TABLE_W))
-  const effectiveW  = Math.min(maxByWidth, maxByHeight)
-  const scale       = effectiveW / TABLE_W
-  const hudWidth    = Math.round(TABLE_W * scale)
+  const hudWidth = canvasWidth
+  const scale    = canvasWidth / TABLE_W
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -125,7 +124,10 @@ export default function GameCanvas({ gameState, onGameOver }) {
     const syncInterval = setInterval(() => {
       // Track canvas position for pocket overlay
       const canvas = gameRef.current?.canvas
-      if (canvas) canvasRectRef.current = canvas.getBoundingClientRect()
+      if (canvas) {
+        canvasRectRef.current = canvas.getBoundingClientRect()
+        setCanvasWidth(Math.round(canvasRectRef.current.width))
+      }
 
       const scene = gameRef.current?.scene?.scenes?.[0]
       if (!scene) return
