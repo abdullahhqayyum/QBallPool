@@ -416,16 +416,15 @@ function handleTurnEnd(scene) {
   // ── Mark break as taken after first shot ──
   const breakTaken = scene.registry.get('breakTaken')
   if (!breakTaken) {
-    scene.registry.set('breakTaken', true)
-    // Don't assign types on the break — just continue turn logic
+    scene.registry.set('breakTaken', true)   // ← flips AFTER this break resolves
     if (objectBalls.length === 0) {
       switchTurn(scene)
       notify(scene, { switched: true, foul: false })
     } else {
-      // Shooter pocketed on the break — they keep the turn but NO type assigned
+      // Pocketed on the break — keep turn but no type assigned
       notify(scene, { switched: false, foul: false })
     }
-    return
+    return  // ← exits before the type-assignment block below
   }
 
   let assignedType = null
@@ -616,6 +615,7 @@ function respawnCueBall(scene, onPlaced) {
       scene.registry.set('placingCueBall', false)
       cueBall._placing = false
       scene.registry.set('kitchenOnly', false)
+      scene._suppressShotUntil = Date.now() + 120
     } else {
       // Snap back to last valid spot (or keep hidden if never placed)
       cueBall.x = lastValidPos.x
@@ -625,6 +625,7 @@ function respawnCueBall(scene, onPlaced) {
       scene.registry.set('placingCueBall', false)
       cueBall._placing = false
       scene.registry.set('kitchenOnly', false)
+      scene._suppressShotUntil = Date.now() + 120
     }
   }
 
