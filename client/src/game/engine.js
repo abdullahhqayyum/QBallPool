@@ -4,6 +4,7 @@ import { stepPhysics, drawTable, checkPockets } from './physics'
 import { setupCue, resetCue, shootCue, predictCueFirstContact } from './cue'
 import { TABLE, BALL, POCKET } from './constants'
 import { useGameStore } from '../store/gameStore'
+import { triggerAIShot, triggerAIPlacement } from './ai'
 
 
 let onGameOverCb = null
@@ -119,7 +120,9 @@ function sceneCreate(gameState) {
     respawnCueBall(this, null, true)
   }
 
-  const myTurn = isOnline ? game?.current_turn === userId : true
+  const myTurn = isOnline
+    ? game?.current_turn === userId
+    : (gameState?.mode === 'ai' ? (Math.random() < 0.5) : true)
 
   this.registry.set('myTurn',               myTurn)
   this.registry.set('ballsWereMoving',      false)
@@ -294,6 +297,24 @@ function sceneUpdate() {
   if (shotFired && moving) {
     this.registry.set('ballsWereMoving', true)
   }
+
+  // ── AI turn trigger ──
+  const mode   = this.registry.get('mode')
+  if (
+    mode === 'ai' &&
+    !myTurn &&
+    !this._aiThinking
+  ) {
+    if (this.registry.get('placingCueBall')) {
+      triggerAIPlacement(this)
+    } else if (
+      !this.registry.get('shotFired') &&
+      !this.registry.get('ballsWereMoving')
+    ) {
+      triggerAIShot(this)
+    }
+  }
+  // ── end AI trigger ──
 }
 
 // ---------------------------------------------------------------------------

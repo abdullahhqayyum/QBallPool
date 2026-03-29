@@ -1,11 +1,11 @@
 import React, { useState } from 'react'
 
 export default function Lobby({ onStart, user }) {
-  const [mode,   setMode]   = useState('offline')
-  const [roomId, setRoomId] = useState('')
+  const [mode,       setMode]       = useState('offline')
+  const [roomId,     setRoomId]     = useState('')
+  const [difficulty, setDifficulty] = useState('medium')
 
   function handleStart() {
-    if (mode === 'ai') return
 
     if (mode === 'online') {
       const room     = (roomId || `room-${Date.now()}`).trim()
@@ -25,7 +25,7 @@ export default function Lobby({ onStart, user }) {
       return
     }
 
-    onStart({ mode, user })
+    onStart({ mode, difficulty: mode === 'ai' ? difficulty : undefined, user })
   }
 
   const modeLabels = { offline: 'Local 2P', ai: 'vs AI', online: 'Online' }
@@ -61,8 +61,8 @@ export default function Lobby({ onStart, user }) {
               borderRadius: 8,
               border:       mode === m ? '2px solid #1a6b2a' : '2px solid #333',
               background:   mode === m ? '#1a6b2a' : '#111',
-              color:        m === 'ai' ? '#555' : '#fff',
-              cursor:       m === 'ai' ? 'not-allowed' : 'pointer',
+              color:        '#fff',
+              cursor:       'pointer',
               fontSize:     13,
               fontFamily:   'monospace',
               fontWeight:   mode === m ? 'bold' : 'normal',
@@ -70,10 +70,38 @@ export default function Lobby({ onStart, user }) {
             }}
           >
             {modeLabels[m]}
-            {m === 'ai' && <div style={{ fontSize: 9, color: '#444', marginTop: 2 }}>coming soon</div>}
           </button>
         ))}
       </div>
+
+      {mode === 'ai' && (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+          <div style={{ color: '#555', fontSize: 11 }}>DIFFICULTY</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {['easy', 'medium', 'hard'].map(d => (
+              <button
+                key={d}
+                onClick={() => setDifficulty(d)}
+                style={{
+                  padding:      '8px 18px',
+                  borderRadius: 8,
+                  border:       difficulty === d ? '2px solid #c8a020' : '2px solid #333',
+                  background:   difficulty === d ? '#3a2e08' : '#111',
+                  color:        difficulty === d ? '#f5c518' : '#555',
+                  cursor:       'pointer',
+                  fontSize:     12,
+                  fontFamily:   'monospace',
+                  fontWeight:   difficulty === d ? 'bold' : 'normal',
+                  textTransform: 'uppercase',
+                  transition:   'all 0.15s',
+                }}
+              >
+                {d}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {mode === 'online' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: 280 }}>
@@ -101,23 +129,22 @@ export default function Lobby({ onStart, user }) {
 
       <button
         onClick={handleStart}
-        disabled={mode === 'ai'}
         style={{
           padding:      '16px 64px',
           borderRadius: 12,
           border:       'none',
-          background:   mode === 'ai' ? '#222' : '#1a6b2a',
-          color:        mode === 'ai' ? '#444' : '#fff',
+          background:   '#1a6b2a',
+          color:        '#fff',
           fontSize:     22,
           fontFamily:   'monospace',
           fontWeight:   'bold',
           letterSpacing: 3,
-          cursor:       mode === 'ai' ? 'not-allowed' : 'pointer',
-          boxShadow:    mode === 'ai' ? 'none' : '0 4px 24px rgba(26,107,42,0.4)',
+          cursor:       'pointer',
+          boxShadow:    '0 4px 24px rgba(26,107,42,0.4)',
           transition:   'all 0.15s',
         }}
-        onMouseEnter={e => { if (mode !== 'ai') e.currentTarget.style.background = '#22882e' }}
-        onMouseLeave={e => { if (mode !== 'ai') e.currentTarget.style.background = '#1a6b2a' }}
+        onMouseEnter={e => { e.currentTarget.style.background = '#22882e' }}
+        onMouseLeave={e => { e.currentTarget.style.background = '#1a6b2a' }}
       >
         PLAY
       </button>

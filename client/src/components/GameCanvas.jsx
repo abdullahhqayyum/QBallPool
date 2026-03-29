@@ -413,7 +413,9 @@ export default function GameCanvas({ gameState, onGameOver }) {
               color:      '#fff',
               whiteSpace: 'nowrap',
             }}>
-              {myTurn ? 'P1 TURN' : 'P2 TURN'}
+              {gameState?.mode === 'ai'
+                ? (myTurn ? 'YOUR TURN' : 'CPU...')
+                : (myTurn ? 'P1 TURN' : 'P2 TURN')}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', height: 36 }}>
               <SpinPicker size={36} spin={spin} onChange={handleSpinChange} />
