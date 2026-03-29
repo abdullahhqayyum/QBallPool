@@ -18,9 +18,6 @@ const MAX_STEP_DIST = BALL.radius * 0.4
 export function stepPhysics(balls) {
   const active = balls.filter(b => !b.pocketed)
 
-  // Work out how many substeps we need this frame so no ball moves more
-  // than MAX_STEP_DIST per substep. Fast cue ball after a hard shot might
-  // need 8-10 substeps; resting balls need only 1.
   const maxSpeed = active.reduce((m, b) => Math.max(m, Math.hypot(b.vx, b.vy)), 0)
   const substeps  = Math.max(1, Math.ceil(maxSpeed / MAX_STEP_DIST))
   const dt        = 1 / substeps
@@ -31,9 +28,11 @@ export function stepPhysics(balls) {
     for (const b of active) {
       b.vx *= friction
       b.vy *= friction
+      // Spin decays each frame
+      if (b.spinX) b.spinX *= 0.98
+      if (b.spinY) b.spinY *= 0.98
       if (Math.abs(b.vx) < MIN_SPEED && Math.abs(b.vy) < MIN_SPEED) {
-        b.vx = 0
-        b.vy = 0
+        b.vx = 0; b.vy = 0
       }
     }
 
@@ -43,57 +42,96 @@ export function stepPhysics(balls) {
       b.y += b.vy * dt
     }
 
-    // 3. Rail bounces
+    // 3. Rail bounces — sidespin affects angle off rail
     const minX = TABLE.playX1 + BALL.radius
     const maxX = TABLE.playX2 - BALL.radius
     const minY = TABLE.playY1 + BALL.radius
     const maxY = TABLE.playY2 - BALL.radius
 
     for (const b of active) {
-      if (b.x < minX) { b.x = minX; b.vx =  Math.abs(b.vx) * RAIL_RESTITUTION; b._railHit = true }
-      if (b.x > maxX) { b.x = maxX; b.vx = -Math.abs(b.vx) * RAIL_RESTITUTION; b._railHit = true }
-      if (b.y < minY) { b.y = minY; b.vy =  Math.abs(b.vy) * RAIL_RESTITUTION; b._railHit = true }
-      if (b.y > maxY) { b.y = maxY; b.vy = -Math.abs(b.vy) * RAIL_RESTITUTION; b._railHit = true }
+      const sx = b.spinX || 0
+      const sy = b.spinY || 0
+      if (b.x < minX) {
+        b.x   = minX
+        b.vx  = Math.abs(b.vx) * RAIL_RESTITUTION
+        b.vy += sx * 0.8   // sidespin transfers to Y on vertical rail
+        b._railHit = true
+      }
+      if (b.x > maxX) {
+        b.x   = maxX
+        b.vx  = -Math.abs(b.vx) * RAIL_RESTITUTION
+        b.vy -= sx * 0.8
+        b._railHit = true
+      }
+      if (b.y < minY) {
+        b.y   = minY
+        b.vy  = Math.abs(b.vy) * RAIL_RESTITUTION
+        b.vx += sy * 0.8   // topspin/backspin transfers to X on horizontal rail
+        b._railHit = true
+      }
+      if (b.y > maxY) {
+        b.y   = maxY
+        b.vy  = -Math.abs(b.vy) * RAIL_RESTITUTION
+        b.vx -= sy * 0.8
+        b._railHit = true
+      }
     }
 
-    // 4. Ball-ball collisions (exact elastic, equal mass)
+    // 4. Ball-ball collisions — spin affects cue ball path after contact
     for (let i = 0; i < active.length; i++) {
       for (let j = i + 1; j < active.length; j++) {
         const a = active[i]
         const b = active[j]
 
-        const dx      = b.x - a.x
-        const dy      = b.y - a.y
-        const dist    = Math.hypot(dx, dy)
+        const dx   = b.x - a.x
+        const dy   = b.y - a.y
+        const dist = Math.hypot(dx, dy)
         const minDist = BALL.radius * 2
 
         if (dist < minDist && dist > 0.0001) {
-          // Normalised collision axis
           const nx = dx / dist
           const ny = dy / dist
 
-          // Push balls apart so they no longer overlap
           const overlap = (minDist - dist) / 2
           a.x -= nx * overlap
           a.y -= ny * overlap
           b.x += nx * overlap
           b.y += ny * overlap
 
-          // Relative velocity along collision axis
           const dvx = a.vx - b.vx
           const dvy = a.vy - b.vy
           const dot = dvx * nx + dvy * ny
 
-          // Only resolve if approaching
           if (dot > 0) {
             const impulse = dot * RESTITUTION
             a.vx -= impulse * nx
             a.vy -= impulse * ny
             b.vx += impulse * nx
             b.vy += impulse * ny
+
+            // Apply spin to cue ball post-collision
+            // Perpendicular to collision normal = tangent direction
+            if (a.label === 'cue' || b.label === 'cue') {
+              const cue    = a.label === 'cue' ? a : b
+              const sx     = cue.spinX || 0
+              const sy     = cue.spinY || 0
+              // Tangent vector (perpendicular to collision normal)
+              const tx     = -ny
+              const ty     =  nx
+              // Sidespin nudges cue ball along tangent
+              const spinForce = 0.6
+              cue.vx += tx * sx * spinForce
+              cue.vy += ty * sx * spinForce
+              // Topspin/backspin adds/removes speed along shot direction
+              const speed  = Math.hypot(cue.vx, cue.vy)
+              const factor = 1 + sy * 0.25
+              if (speed > 0) {
+                cue.vx = (cue.vx / speed) * speed * factor
+                cue.vy = (cue.vy / speed) * speed * factor
+              }
+            }
           }
 
-          // Tag for first-contact tracking in engine (only first substep tag matters)
           a._collidedWith = a._collidedWith || b.label
           b._collidedWith = b._collidedWith || a.label
         }

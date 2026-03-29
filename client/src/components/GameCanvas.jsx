@@ -3,6 +3,7 @@ import { useGameStore } from '../store/gameStore'
 import { initEngine, destroyEngine } from '../game/engine'
 import MatchResult from './MatchResult'
 import PocketCallModal from './PocketCallModal'
+import { setSpin, getSpin } from '../game/cue'
 
 function getBallColor(n) {
   const colors = {
@@ -30,10 +31,62 @@ function useWindowSize() {
 
 const TABLE_W = 800
 const TABLE_H = 450
+const HUD_RESERVE = 96
 
 function getScale(windowWidth) {
   const maxW = Math.min(windowWidth - 8, TABLE_W)
   return Math.min(1, maxW / TABLE_W)
+}
+
+function SpinPicker({ spin, onChange, size = 48 }) {
+  const radius  = size / 2
+  const dotR    = Math.max(4, Math.round(size * 0.12))
+  const isDragging = useRef(false)
+
+  const dotX = radius + spin.x * (radius - dotR - 2)
+  const dotY = radius + spin.y * (radius - dotR - 2)
+
+  function applyFromEvent(e, el) {
+    const rect = el.getBoundingClientRect()
+    const cx   = rect.left + radius
+    const cy   = rect.top  + radius
+    const rawX = ((e.clientX ?? e.touches?.[0]?.clientX) - cx) / (radius - dotR - 2)
+    const rawY = ((e.clientY ?? e.touches?.[0]?.clientY) - cy) / (radius - dotR - 2)
+    const mag  = Math.hypot(rawX, rawY)
+    const x    = mag > 1 ? rawX / mag : rawX
+    const y    = mag > 1 ? rawY / mag : rawY
+    onChange({ x: +x.toFixed(2), y: +y.toFixed(2) })
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+      <div style={{ fontSize: 8, color: '#555', fontFamily: 'monospace' }}>SPIN</div>
+      <svg
+        width={size} height={size}
+        style={{ cursor: 'crosshair', touchAction: 'none' }}
+        onMouseDown={e  => { isDragging.current = true;  applyFromEvent(e, e.currentTarget) }}
+        onMouseMove={e  => { if (isDragging.current) applyFromEvent(e, e.currentTarget) }}
+        onMouseUp={() =>    { isDragging.current = false }}
+        onMouseLeave={() => { isDragging.current = false }}
+        onTouchStart={e => { isDragging.current = true;  applyFromEvent(e, e.currentTarget) }}
+        onTouchMove={e  => { isDragging.current = true;  applyFromEvent(e, e.currentTarget) }}
+        onTouchEnd={() =>   { isDragging.current = false }}
+      >
+        <circle cx={radius} cy={radius} r={radius - 1} fill="#1a1a1a" stroke="#333" strokeWidth={1} />
+        <line x1={radius} y1={2}      x2={radius}      y2={size - 2} stroke="#2a2a2a" strokeWidth={1} />
+        <line x1={2}      y1={radius} x2={size - 2}    y2={radius}   stroke="#2a2a2a" strokeWidth={1} />
+        <circle cx={dotX} cy={dotY} r={dotR} fill={Math.hypot(spin.x, spin.y) > 0.1 ? '#ffdd44' : '#444'} />
+      </svg>
+      <div
+        style={{ fontSize: 8, color: '#444', fontFamily: 'monospace', cursor: 'pointer' }}
+        onClick={() => onChange({ x: 0, y: 0 })}
+      >
+        {Math.hypot(spin.x, spin.y) > 0.1
+          ? `${spin.x > 0 ? 'R' : spin.x < 0 ? 'L' : ''}${spin.y > 0 ? '+top' : spin.y < 0 ? '+back' : ''}`
+          : 'none'}
+      </div>
+    </div>
+  )
 }
 
 export default function GameCanvas({ gameState, onGameOver }) {
@@ -46,6 +99,8 @@ export default function GameCanvas({ gameState, onGameOver }) {
   const [pocketed, setPocketed] = useState([])
   const [foul,     setFoul]     = useState(false)
   const [result,   setResult]   = useState(null)
+
+  const [spin, setSpin_] = useState({ x: 0, y: 0 })
 
   const [canvasWidth, setCanvasWidth] = useState(window.innerWidth)
 
@@ -93,6 +148,13 @@ export default function GameCanvas({ gameState, onGameOver }) {
           })
         }
         // Clear any called-pocket/react state on turn end so HUD resets
+        // Also reset spin state for the new turn
+        try {
+          setSpin(0, 0)
+        } catch (e) {
+          // ignore if module not ready
+        }
+        setSpin_({ x: 0, y: 0 })
         setCalledPocket(null)
         setNeedsPocketCall(false)
       },
@@ -100,6 +162,12 @@ export default function GameCanvas({ gameState, onGameOver }) {
         setPocketed(prev => [...prev, ball.label])
       }
     )
+
+    // initialise local spin state from the cue module
+    try {
+      const s = getSpin()
+      if (s) setSpin_(s)
+    } catch (e) {}
 
     if (gameState?.mode === 'online') {
       import('../socket/client').then(({ setScene, setOnTurnDone, joinRoom }) => {
@@ -196,6 +264,13 @@ export default function GameCanvas({ gameState, onGameOver }) {
     setNeedsPocketCall(false)
   }
 
+  function handleSpinChange(next) {
+    try {
+      setSpin(next.x, next.y)
+    } catch (e) {}
+    setSpin_(next)
+  }
+
   if (result) {
     return (
       <MatchResult
@@ -209,21 +284,23 @@ export default function GameCanvas({ gameState, onGameOver }) {
   const ballSz = Math.max(12, Math.round(18 * scale))
   const ballGap = Math.max(3, Math.round(5 * scale))
 
+  const canvasMaxH = Math.max(200, windowHeight - HUD_RESERVE)
+
   return (
     <div style={{
       display:            'flex',
       flexDirection:      'column',
       alignItems:         'center',
       background:         '#0a0a0a',
-      minHeight:          '100dvh',
+      minHeight:          '100vh',
       paddingTop:         'env(safe-area-inset-top, 0px)',
       paddingBottom:      'env(safe-area-inset-bottom, 8px)',
       overflowX:          'hidden',
-      overflowY:          'auto',       // allow scroll if table still overflows
+      overflowY:          'hidden',
       overscrollBehavior: 'contain',
     }}>
       {/* Canvas wrapper — no extra borders; all visuals are inside Phaser */}
-      <div style={{ position: 'relative', lineHeight: 0, touchAction: 'none' }}>
+      <div style={{ position: 'relative', lineHeight: 0, touchAction: 'none', maxHeight: canvasMaxH, width: '100%', overflow: 'hidden' }}>
         <div
           id="game-container"
           ref={containerRef}
@@ -324,18 +401,23 @@ export default function GameCanvas({ gameState, onGameOver }) {
           {placingCueBall && (
             <div style={{ color: '#ffaa00', fontSize: 9, marginBottom: 2 }}>BALL IN HAND</div>
           )}
-          <div style={{
-            fontSize:   Math.max(10, Math.round(13 * scale)),
-            fontWeight: 'bold',
-            padding:    `4px ${Math.round(12 * scale)}px`,
-            borderRadius: 6,
-            minWidth:   Math.round(80 * scale),
-            textAlign:  'center',
-            background: myTurn ? '#1a6b2a' : '#6b1a1a',
-            color:      '#fff',
-            whiteSpace: 'nowrap',
-          }}>
-            {myTurn ? 'P1 TURN' : 'P2 TURN'}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <div style={{
+              fontSize:   Math.max(10, Math.round(13 * scale)),
+              fontWeight: 'bold',
+              padding:    `4px ${Math.round(12 * scale)}px`,
+              borderRadius: 6,
+              minWidth:   Math.round(80 * scale),
+              textAlign:  'center',
+              background: myTurn ? '#1a6b2a' : '#6b1a1a',
+              color:      '#fff',
+              whiteSpace: 'nowrap',
+            }}>
+              {myTurn ? 'P1 TURN' : 'P2 TURN'}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', height: 36 }}>
+              <SpinPicker size={36} spin={spin} onChange={handleSpinChange} />
+            </div>
           </div>
           {!myType && (
             <div style={{ fontSize: 8, color: '#444', marginTop: 2 }}>pot a ball to assign</div>

@@ -15,6 +15,9 @@ const AIM_DRAG_SENSITIVITY = 0.03
 const CANCEL_RADIUS = 20
 let   smoothedPtr          = null
 let   smoothedDeflect      = null
+// Spin state: -1..+1
+let spinX = 0  // -1 left, +1 right
+let spinY = 0  // -1 backspin, +1 topspin
 
 function smoothPointer(raw) {
   if (!smoothedPtr) {
@@ -256,9 +259,12 @@ export function resetCue(scene) {
   if (powerBar) powerBar.clear()
   if (pullLine) pullLine.clear()
   smoothedPtr = null; smoothedDeflect = null
+  spinX = 0
+  spinY = 0
   if (scene) {
-    scene.registry.set('shotFired',           false)
+    scene.registry.set('shotFired', false)
     scene.registry.set('firstCueContactLabel', null)
+    scene.registry.set('spin', { x: 0, y: 0 })
   }
 }
 
@@ -273,8 +279,10 @@ export function shootCue(scene, angle, power) {
   const curvedPower     = Math.pow(normalizedPower, CUE.powerCurve)
   const speed = (CUE.minForce + (CUE.maxForce - CUE.minForce) * curvedPower) * 280
 
-  cueBall.vx = Math.cos(angle) * speed
-  cueBall.vy = Math.sin(angle) * speed
+  cueBall.vx    = Math.cos(angle) * speed
+  cueBall.vy    = Math.sin(angle) * speed
+  cueBall.spinX = spinX
+  cueBall.spinY = spinY
 }
 
 // ---------------------------------------------------------------------------
@@ -691,4 +699,12 @@ function drawAimLineByAngle(scene, angle) {
 }
 
 // Export debug helpers
+export function setSpin(x, y) {
+  spinX = Math.max(-1, Math.min(1, x))
+  spinY = Math.max(-1, Math.min(1, y))
+}
+
+export function getSpin() {
+  return { x: spinX, y: spinY }
+}
 export { drawAimLine }
