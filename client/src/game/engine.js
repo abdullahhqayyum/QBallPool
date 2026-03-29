@@ -115,6 +115,8 @@ function sceneCreate(gameState) {
     createTestRack(this)
   } else {
     createBalls(this)
+    // Allow player to place cue ball in kitchen before the opening break
+    respawnCueBall(this)
   }
 
   const myTurn = isOnline ? game?.current_turn === userId : true
@@ -142,6 +144,9 @@ function sceneCreate(gameState) {
 
   this.registry.set('pendingResult', null)
 
+  // Whether the opening break shot has been taken (prevents assigning types on the break)
+  this.registry.set('breakTaken', false)
+
   if (isRejoin && game?.my_type) {
     this.registry.set('myType',  game.my_type)
     this.registry.set('oppType', game.my_type === 'solid' ? 'stripe' : 'solid')
@@ -157,12 +162,19 @@ function sceneCreate(gameState) {
   }
 
 setupCue(this, (angle, power) => {
+  // Block shooting while placing cue ball
+  if (this.registry.get('placingCueBall')) return
+
+  // Block shooting while waiting for pocket call on 8-ball
+  const gs = useGameStore.getState()
+  if (gs?.selectingPocket) return
+
   if (typeof this._cueBallPlacementCleanup === 'function') {
-      this._cueBallPlacementCleanup()
-      this._cueBallPlacementCleanup = null
-    }
-    if (isOnline) return
-  })
+    this._cueBallPlacementCleanup()
+    this._cueBallPlacementCleanup = null
+  }
+  if (isOnline) return
+})
 
   if (typeof window !== 'undefined') {
     window.__runPoolCollisionDiagnostics = () => startCollisionDiagnostics(this)
@@ -401,6 +413,21 @@ function handleTurnEnd(scene) {
     return
   }
 
+  // ── Mark break as taken after first shot ──
+  const breakTaken = scene.registry.get('breakTaken')
+  if (!breakTaken) {
+    scene.registry.set('breakTaken', true)
+    // Don't assign types on the break — just continue turn logic
+    if (objectBalls.length === 0) {
+      switchTurn(scene)
+      notify(scene, { switched: true, foul: false })
+    } else {
+      // Shooter pocketed on the break — they keep the turn but NO type assigned
+      notify(scene, { switched: false, foul: false })
+    }
+    return
+  }
+
   let assignedType = null
   const myType     = currentMyType
   const myTurn     = currentlyMine
@@ -510,21 +537,28 @@ function respawnCueBall(scene, onPlaced) {
   const balls   = scene.registry.get('balls') || []
   const cueBall = balls.find(b => b.label === 'cue')
   if (!cueBall) return
-
   cueBall.vx       = 0
   cueBall.vy       = 0
   cueBall.pocketed = false
+
+  // Make cue ball visible so the player can click it to pick up
   if (cueBall.gfx) cueBall.gfx.setVisible(true)
+
+  // Mark placing so physics/step logic can ignore the cue while it's being positioned
+  cueBall._placing = true
 
   scene.registry.set('placingCueBall',  true)
   scene.registry.set('shotFired',       false)
   scene.registry.set('ballsWereMoving', false)
 
+  const breakTaken  = scene.registry.get('breakTaken')
+    const maxX        = breakTaken ? TABLE.playX2 - BALL.radius : TABLE.playX1 + (TABLE.playX2 - TABLE.playX1) * 0.25
   const clampToTable = (x, y) => ({
-    x: Math.max(TABLE.playX1 + BALL.radius, Math.min(TABLE.playX2 - BALL.radius, x)),
+    x: Math.max(TABLE.playX1 + BALL.radius, Math.min(maxX, x)),
     y: Math.max(TABLE.playY1 + BALL.radius, Math.min(TABLE.playY2 - BALL.radius, y)),
   })
 
+  // Place at a default valid position but keep invisible until drag starts
   cueBall.x = TABLE.width * 0.25
   cueBall.y = TABLE.height * 0.5
   if (cueBall.gfx) cueBall.gfx.setPosition(cueBall.x, cueBall.y)
@@ -540,14 +574,19 @@ function respawnCueBall(scene, onPlaced) {
     scene.input.off('pointerdown', downHandler)
     scene.input.off('pointermove', moveHandler)
     scene.input.off('pointerup',   upHandler)
-    if (cueBall.gfx) cueBall.gfx.setAlpha(1)
+    if (cueBall.gfx) { cueBall.gfx.setAlpha(1); cueBall.gfx.setVisible(true) }
+    cueBall._placing = false
+    scene.registry.set('kitchenOnly', false)
   }
 
   const downHandler = (ptr) => {
+    // Only start drag if clicking on or near the cue ball
     if (Math.hypot(ptr.x - cueBall.x, ptr.y - cueBall.y) > BALL.radius * 3) return
     dragging = true
-    // Block shooting while actively dragging
     scene.registry.set('placingCueBall', true)
+
+    // Optional: indicate kitchen-only placement when break hasn't been taken
+    scene.registry.set('kitchenOnly', !scene.registry.get('breakTaken'))
   }
 
   const moveHandler = (ptr) => {
@@ -571,18 +610,21 @@ function respawnCueBall(scene, onPlaced) {
       cueBall.y = pos.y
       cueBall.vx = 0
       cueBall.vy = 0
-      if (cueBall.gfx) cueBall.gfx.setPosition(pos.x, pos.y)
+      if (cueBall.gfx) { cueBall.gfx.setPosition(pos.x, pos.y); cueBall.gfx.setVisible(true) }
       lastValidPos = { x: pos.x, y: pos.y }
       updateTint(true)
-      // Release placement lock — cue events re-enable so player can aim and shoot
       scene.registry.set('placingCueBall', false)
+      cueBall._placing = false
+      scene.registry.set('kitchenOnly', false)
     } else {
-      // Snap back to last valid spot
+      // Snap back to last valid spot (or keep hidden if never placed)
       cueBall.x = lastValidPos.x
       cueBall.y = lastValidPos.y
-      if (cueBall.gfx) cueBall.gfx.setPosition(lastValidPos.x, lastValidPos.y)
+      if (cueBall.gfx) { cueBall.gfx.setPosition(lastValidPos.x, lastValidPos.y); cueBall.gfx.setVisible(true) }
       updateTint(true)
       scene.registry.set('placingCueBall', false)
+      cueBall._placing = false
+      scene.registry.set('kitchenOnly', false)
     }
   }
 

@@ -41,6 +41,32 @@ cd client && npm run dev
 cd server && npm run dev
 ```
 
+### Run both dev servers in VS Code (integrated PowerShell)
+
+If you prefer two integrated PowerShell terminals inside VS Code (recommended for debugging), open the integrated terminal (View → Terminal or Ctrl+`) and create two terminals. In the first terminal type:
+
+```powershell
+cd C:\Anviro\8ball\client
+npm run dev
+```
+
+In the second terminal type:
+
+```powershell
+cd C:\Anviro\8ball\server
+npm run dev
+```
+
+Alternative options:
+
+- Run the VS Code compound task (opens two integrated terminals) via Command Palette: `Tasks: Run Task` → select `Dev: Both`.
+- Or run the Windows helper (opens two external PowerShell windows) from the repo root:
+
+```powershell
+npm run dev:windows
+```
+
+
 ### Environment (optional)
 
 Create `client/.env`:
@@ -78,68 +104,73 @@ alter table games
   add column if not exists player2_type text;
 ```
 
-## Project Structure
+## Full folder structure
+
+This project tree lists every file and folder present in the repository (no files omitted):
 
 ```
 .
-├─ client/
-│  ├─ package.json                # frontend deps & scripts
-│  ├─ vite.config.js              # Vite config
-│  ├─ index.html
-│  ├─ .env                        # optional: VITE_SERVER_URL
-│  └─ src/
-│     ├─ main.jsx                 # app bootstrap
-│     ├─ App.jsx                  # root React component
-│     ├─ pages/                   # thin page wrappers (layout/routing)
-│     │  ├─ AuthPage.jsx
-│     │  ├─ GameListPage.jsx
-│     │  └─ LobbyPage.jsx
-│     ├─ components/              # React UI (pure components)
-│     │  ├─ Auth.jsx
-│     │  ├─ GameCanvas.jsx        # mounts Phaser canvas
-│     │  ├─ GameList.jsx
-│     │  ├─ HUD.jsx               # in-game HUD + controls
-│     │  ├─ Lobby.jsx
-│     │  ├─ MatchResult.jsx
-│     │  ├─ PocketCallModal.jsx
-│     ├─ game/                    # Phaser + physics + game logic
-│     │  ├─ balls.js              # ball objects, helpers, tests
-│     │  ├─ balls.test.js
-│     │  ├─ constants.js
-│     │  ├─ cue.js                # aiming / shooting helpers + tests
-│     │  ├─ cue.test.js
-│     │  ├─ engine.js             # Phaser scene, update loop
-│     │  ├─ physics.js            # rail/cushion/pocket logic + tests
-│     │  └─ physics.test.js
-│     ├─ lib/
-│     │  └─ supabase.js           # supabase client wrapper
-│     ├─ socket/
-│     │  └─ client.js             # socket message helpers
-│     └─ store/
-│        └─ gameStore.js          # React state (game lobby, user)
-
-├─ server/
-│  ├─ package.json
-│  ├─ .env                        # SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
-│  ├─ sql/
-│  │  └─ 001_add_player_types_to_games.sql
-│  └─ src/
-│     ├─ index.js                 # express + socket server entry
-│     ├─ db/
-│     │  ├─ games.js              # DB helpers for games table
-│     │  └─ supabase.js           # server-side supabase client
-│     ├─ game/
-│     │  └─ validator.js          # server-side shot validation logic
-│     ├─ rooms/
-│     │  ├─ GameRoom.js           # per-room game state + lifecycle
-│     │  └─ RoomManager.js        # manages active rooms
-│     └─ socket/
-│        └─ handlers.js           # socket.io event handlers
-
+├─ netlify.toml
+├─ package.json
 ├─ README.md
-└─ package.json
+└─ client/
+  ├─ package.json
+  ├─ index.html
+  ├─ vite.config.js
+  ├─ .env                  # optional: VITE_SERVER_URL
+  ├─ public/
+  │  └─ _redirects
+  └─ src/
+    ├─ main.jsx
+    ├─ App.jsx
+    ├─ pages/
+    │  ├─ AuthPage.jsx
+    │  ├─ GameListPage.jsx
+    │  └─ LobbyPage.jsx
+    ├─ components/
+    │  ├─ Auth.jsx
+    │  ├─ GameCanvas.jsx
+    │  ├─ GameList.jsx
+    │  ├─ HUD.jsx
+    │  ├─ Lobby.jsx
+    │  ├─ MatchResult.jsx
+    │  └─ PocketCallModal.jsx
+    ├─ game/
+    │  ├─ balls.js
+    │  ├─ balls.test.js
+    │  ├─ constants.js
+    │  ├─ cue.js
+    │  ├─ cue.test.js
+    │  ├─ DiagScene.js
+    │  ├─ engine.js
+    │  ├─ physics.js
+    │  └─ physics.test.js
+    ├─ lib/
+    │  └─ supabase.js
+    ├─ socket/
+    │  └─ client.js
+    └─ store/
+      └─ gameStore.js
 
-``` 
+└─ server/
+  ├─ package.json
+  ├─ .env                  # SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (optional)
+  ├─ sql/
+  │  └─ 001_add_player_types_to_games.sql
+  └─ src/
+    ├─ index.js
+    ├─ db/
+    │  ├─ games.js
+    │  └─ supabase.js
+    ├─ game/
+    │  └─ validator.js
+    ├─ rooms/
+    │  ├─ GameRoom.js
+    │  └─ RoomManager.js
+    └─ socket/
+      └─ handlers.js
+
+```
 
 Notes:
 - Tests: unit tests for game physics live alongside their modules (`*.test.js`).

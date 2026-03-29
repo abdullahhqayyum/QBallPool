@@ -16,7 +16,8 @@ const RAIL_RESTITUTION = 0.75    // energy kept on rail bounce
 const MAX_STEP_DIST = BALL.radius * 0.4
 
 export function stepPhysics(balls) {
-  const active = balls.filter(b => !b.pocketed)
+  // Exclude balls that are currently being placed by the player
+  const active = balls.filter(b => !b.pocketed && !b._placing)
 
   const maxSpeed = active.reduce((m, b) => Math.max(m, Math.hypot(b.vx, b.vy)), 0)
   const substeps  = Math.max(1, Math.ceil(maxSpeed / MAX_STEP_DIST))

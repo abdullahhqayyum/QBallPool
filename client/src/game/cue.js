@@ -210,6 +210,13 @@ export function setupCue(scene, onShoot) {
 
   // ---- Phaser pointer events (already in game-space) -----------------------
   scene.input.on('pointermove', (ptr) => {
+    // Don't draw or update aim while placing cue ball or selecting pocket
+    if (scene.registry.get('placingCueBall')) return
+    try {
+      const gs = useGameStore.getState()
+      if (gs?.selectingPocket) return
+    } catch (e) {}
+
     if (!canShoot(scene)) return
     // Phaser pointer coords are already in game-space — no conversion needed
     if (dragStart) {
