@@ -116,7 +116,7 @@ function sceneCreate(gameState) {
   } else {
     createBalls(this)
     // Allow player to place cue ball in kitchen before the opening break
-    respawnCueBall(this)
+    respawnCueBall(this, null, true)
   }
 
   const myTurn = isOnline ? game?.current_turn === userId : true
@@ -145,7 +145,8 @@ function sceneCreate(gameState) {
   this.registry.set('pendingResult', null)
 
   // Whether the opening break shot has been taken (prevents assigning types on the break)
-  this.registry.set('breakTaken', false)
+  // blocks assignment for break shot + its resulting turn-end
+  this.registry.set('breakShotsRemaining', 2)
 
   if (isRejoin && game?.my_type) {
     this.registry.set('myType',  game.my_type)
@@ -205,6 +206,8 @@ function sceneUpdate() {
   // Run physics step (friction, movement, rail bounce, ball-ball collision)
   stepPhysics(balls)
 
+    // (break handling now uses `breakShotsRemaining` counter)
+
   // ---- First contact + rail tracking (replaces Matter collision events) ----
   if (this.registry.get('shotFired')) {
     balls.forEach(b => {
@@ -228,6 +231,27 @@ function sceneUpdate() {
   syncBallGraphics(this)
 
   // Pocket detection
+  // ── Continuously gate shooting when 8-ball is the only ball left ──
+  const mt = this.registry.get('myType')
+  const allBalls = this.registry.get('balls') || []
+  const myTurn = this.registry.get('myTurn')
+  const oppType = mt === 'solid' ? 'stripe' : mt === 'stripe' ? 'solid' : null
+  const shooterType = myTurn ? mt : oppType
+
+  if (shooterType) {
+    const shooterBalls  = allBalls.filter(b => b.type === shooterType)
+    const eightBall     = allBalls.find(b => b.type === '8ball')
+    const allCleared    = shooterBalls.length > 0 && shooterBalls.every(b => b.pocketed)
+    const eightStillUp  = eightBall && !eightBall.pocketed
+    const alreadyCalled = this.registry.get('calledPocket') !== null &&
+                          this.registry.get('calledPocket') !== undefined
+
+    if (allCleared && eightStillUp && !alreadyCalled) {
+      this.registry.set('selectingPocket', true)
+      useGameStore.setSelectingPocket(true)
+    }
+  }
+
   checkPockets(this, (ball) => {
     ball.pocketed = true
     ball.vx = 0
@@ -263,8 +287,8 @@ function sceneUpdate() {
       return
     }
 
-    handleTurnEnd(this)
-    return
+      handleTurnEnd(this)
+      return
   }
 
   if (shotFired && moving) {
@@ -349,6 +373,21 @@ function handleTurnEnd(scene) {
   const scratched   = pocketedThisTurn.some(b => b.type === 'cue')
   const expectedType = currentlyMine ? currentMyType : currentOppType
 
+  // ── Break guard — skip ALL type assignment and foul logic for the opening shot ──
+  const breakShotsRemaining = scene.registry.get('breakShotsRemaining') ?? 0
+  if (breakShotsRemaining > 0) {
+    scene.registry.set('breakShotsRemaining', breakShotsRemaining - 1)
+    if (scratched || objectBalls.length === 0) {
+      switchTurn(scene)
+      notify(scene, { switched: true, foul: false })
+    } else {
+      // Pocketed on the break — keep turn, no type assigned yet
+      notify(scene, { switched: false, foul: false })
+    }
+    return
+  }
+  // ── end break guard ──
+
   if (scratched) {
     scene.registry.set('foul', true)
     switchTurn(scene)
@@ -411,20 +450,6 @@ function handleTurnEnd(scene) {
     switchTurn(scene)
     notify(scene, { switched: true, foul: false })
     return
-  }
-
-  // ── Mark break as taken after first shot ──
-  const breakTaken = scene.registry.get('breakTaken')
-  if (!breakTaken) {
-    scene.registry.set('breakTaken', true)   // ← flips AFTER this break resolves
-    if (objectBalls.length === 0) {
-      switchTurn(scene)
-      notify(scene, { switched: true, foul: false })
-    } else {
-      // Pocketed on the break — keep turn but no type assigned
-      notify(scene, { switched: false, foul: false })
-    }
-    return  // ← exits before the type-assignment block below
   }
 
   let assignedType = null
@@ -532,7 +557,7 @@ function isValidCuePlacement(scene, cueBall, x, y) {
   return true
 }
 
-function respawnCueBall(scene, onPlaced) {
+function respawnCueBall(scene, onPlaced, kitchenOnly = false) {
   const balls   = scene.registry.get('balls') || []
   const cueBall = balls.find(b => b.label === 'cue')
   if (!cueBall) return
@@ -550,13 +575,13 @@ function respawnCueBall(scene, onPlaced) {
   scene.registry.set('shotFired',       false)
   scene.registry.set('ballsWereMoving', false)
 
-  const breakTaken  = scene.registry.get('breakTaken')
-    const maxX        = breakTaken ? TABLE.playX2 - BALL.radius : TABLE.playX1 + (TABLE.playX2 - TABLE.playX1) * 0.25
+  const maxX = kitchenOnly
+    ? TABLE.playX1 + (TABLE.playX2 - TABLE.playX1) * 0.25
+    : TABLE.playX2 - BALL.radius
   const clampToTable = (x, y) => ({
     x: Math.max(TABLE.playX1 + BALL.radius, Math.min(maxX, x)),
     y: Math.max(TABLE.playY1 + BALL.radius, Math.min(TABLE.playY2 - BALL.radius, y)),
   })
-
   // Place at a default valid position but keep invisible until drag starts
   cueBall.x = TABLE.width * 0.25
   cueBall.y = TABLE.height * 0.5
@@ -585,7 +610,7 @@ function respawnCueBall(scene, onPlaced) {
     scene.registry.set('placingCueBall', true)
 
     // Optional: indicate kitchen-only placement when break hasn't been taken
-    scene.registry.set('kitchenOnly', !scene.registry.get('breakTaken'))
+    scene.registry.set('kitchenOnly', (scene.registry.get('breakShotsRemaining') ?? 0) > 0)
   }
 
   const moveHandler = (ptr) => {
