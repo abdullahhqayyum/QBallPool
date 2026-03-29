@@ -67,6 +67,28 @@ export default function App() {
     }
   }, [screen])
 
+  // Request fullscreen on first user interaction (must be user-initiated).
+  // This hides the URL bar on supporting browsers. Note: iOS Safari
+  // doesn't implement the Fullscreen API — the Add-to-Home-Screen flow
+  // is required there.
+  useEffect(() => {
+    const requestFullscreen = () => {
+      const el = document.documentElement
+      if (el.requestFullscreen)            el.requestFullscreen()
+      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen()
+      else if (el.mozRequestFullScreen)    el.mozRequestFullScreen()
+      else if (el.msRequestFullscreen)     el.msRequestFullscreen()
+    }
+
+    document.addEventListener('touchstart', requestFullscreen, { once: true })
+    document.addEventListener('click',      requestFullscreen, { once: true })
+
+    return () => {
+      document.removeEventListener('touchstart', requestFullscreen)
+      document.removeEventListener('click',      requestFullscreen)
+    }
+  }, [])
+
   function handleGameOver(outcome) {
     setUser(makeGuest())
     setScreen('lobby')

@@ -30,6 +30,8 @@ export default function Lobby({ onStart, user }) {
 
   const modeLabels = { offline: 'Local 2P', ai: 'vs AI', online: 'Online' }
 
+  const isIOS = typeof navigator !== 'undefined' && /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.navigator.standalone
+
   return (
     <div style={{
       minHeight:      '100dvh',
@@ -119,6 +121,21 @@ export default function Lobby({ onStart, user }) {
       >
         PLAY
       </button>
+
+      {isIOS && (
+        <div style={{
+          color:        '#444',
+          fontSize:     11,
+          textAlign:    'center',
+          maxWidth:     260,
+          lineHeight:   1.5,
+          fontFamily:   'monospace',
+          marginTop:    10,
+        }}>
+          📲 For best experience on iPhone:<br/>
+          <span style={{ color: '#666' }}>Share → Add to Home Screen</span>
+        </div>
+      )}
 
       <div style={{ color: '#333', fontSize: 11 }}>
         playing as guest · {user?.id?.slice(0, 14)}
