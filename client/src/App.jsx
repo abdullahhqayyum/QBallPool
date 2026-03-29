@@ -28,6 +28,12 @@ if (typeof document !== 'undefined') {
     canvas { display: block !important; }
   `
   document.head.appendChild(style)
+  // Ensure the page is slightly taller than the viewport so we can trigger
+  // a small scroll to collapse mobile browser chrome (URL bar).
+  style.textContent += `
+    html { height: 100%; }
+    body { min-height: 101vh; }
+  `
 }
 
 function makeGuest() {
@@ -42,6 +48,23 @@ export default function App() {
   useEffect(() => {
     document.body.classList.toggle('screen-game',   screen === 'game')
     document.body.classList.toggle('screen-locked', screen !== 'game')
+  }, [screen])
+
+  // Nudge scroll to collapse mobile browser chrome (URL bar).
+  // Works on iOS Safari and Android Chrome; we do a tiny scroll then snap back.
+  useEffect(() => {
+    setTimeout(() => {
+      window.scrollTo(0, 1)
+      setTimeout(() => window.scrollTo(0, 0), 50)
+    }, 300)
+  }, [])
+
+  // When switching to the game screen, nudge scroll again so the chrome
+  // collapses reliably when entering full-screen-like view.
+  useEffect(() => {
+    if (screen === 'game') {
+      setTimeout(() => window.scrollTo(0, 1), 100)
+    }
   }, [screen])
 
   function handleGameOver(outcome) {
