@@ -164,6 +164,7 @@ export default function GameCanvas({ gameState, onGameOver }) {
   const containerRef = useRef(null)
   const gameRef      = useRef(null)
   const canvasRectRef = useRef(null)
+  const hudRef = useRef(null)
 
   const [myTurn,   setMyTurn]   = useState(true)
   const [myType,   setMyType]   = useState(null)
@@ -184,10 +185,33 @@ export default function GameCanvas({ gameState, onGameOver }) {
   const [calledPocket,         setCalledPocket]         = useState(null)
   const [opponentDisconnected, setOpponentDisconnected] = useState(false)
   const [waitingForOpponent,   setWaitingForOpponent]   = useState(false)
+  const [hudHeight,            setHudHeight]            = useState(HUD_RESERVE)
 
   const { w: windowWidth, h: windowHeight } = useWindowSize()
   const hudWidth = canvasWidth
   const scale    = canvasWidth / TABLE_W
+
+  useEffect(() => {
+    const el = hudRef.current
+    if (!el) return
+
+    const updateHudHeight = () => {
+      const h = Math.ceil(el.getBoundingClientRect().height)
+      // Small safety buffer so the board never touches/overlaps the HUD.
+      setHudHeight(Math.max(HUD_RESERVE, h + 8))
+    }
+
+    updateHudHeight()
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(updateHudHeight)
+      observer.observe(el)
+      return () => observer.disconnect()
+    }
+
+    window.addEventListener('resize', updateHudHeight)
+    return () => window.removeEventListener('resize', updateHudHeight)
+  }, [windowWidth])
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -401,7 +425,7 @@ export default function GameCanvas({ gameState, onGameOver }) {
   const ballSz = Math.max(12, Math.round(18 * scale))
   const ballGap = Math.max(3, Math.round(5 * scale))
 
-  const canvasMaxH = Math.max(200, windowHeight - HUD_RESERVE)
+  const canvasMaxH = Math.max(180, windowHeight - hudHeight)
 
   return (
     <div style={{
@@ -486,7 +510,9 @@ export default function GameCanvas({ gameState, onGameOver }) {
       )}
 
       {/* HUD */}
-      <div style={{
+      <div
+        ref={hudRef}
+        style={{
         width:          hudWidth,
         marginTop:      6,
         background:     '#111',
@@ -553,26 +579,26 @@ export default function GameCanvas({ gameState, onGameOver }) {
                             : cheatAvailable ? '#7a1f00'
                             : '#1c1c1c',
                 border:       cheatAvailable && !cheatUsed
-                                ? '2px solid #ff5500'
-                                : '2px solid #333',
-                borderRadius: 8,
-                padding:      '3px 8px',
+                                ? '1px solid #ff5500'
+                                : '1px solid #333',
+                borderRadius: 6,
+                padding:      '1px 6px',
                 color:        cheatUsed      ? '#333'
                             : cheatAvailable ? '#fff'
                             : '#3a3a3a',
-                fontSize:     13,
+                fontSize:     11,
                 fontFamily:   'monospace',
                 fontWeight:   'bold',
                 display:      'flex',
                 alignItems:   'center',
-                gap:          3,
+                gap:          2,
                 boxShadow:    cheatAvailable && !cheatUsed ? '0 0 10px #ff550066' : 'none',
                 transition:   'all 0.2s',
                 animation:    cheatAvailable && !cheatUsed ? 'cheatPulse 1s ease-in-out infinite' : 'none',
               }}
             >
-              <span style={{ fontSize: 14 }}>{cheatUsed ? '🚫' : '⏪'}</span>
-              <span style={{ fontSize: 9, letterSpacing: 1 }}>{cheatUsed ? 'USED' : 'CHEAT'}</span>
+              <span style={{ fontSize: 11, lineHeight: 1 }}>{cheatUsed ? '🚫' : '⏪'}</span>
+              <span style={{ fontSize: 8, letterSpacing: 0.5, lineHeight: 1 }}>{cheatUsed ? 'USED' : 'CHEAT'}</span>
             </button>
 
             <div style={{ display: 'flex', alignItems: 'center', height: 36 }}>
