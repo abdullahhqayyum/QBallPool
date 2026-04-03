@@ -168,7 +168,7 @@ export default function Lobby({ onStart, user }) {
           name:     feedbackName.trim(),
           email:    feedbackEmail.trim() || undefined,
           message:  feedbackMsg.trim(),
-          _subject: `8-Ball Feedback from ${feedbackName.trim()}`,
+          _subject: `Q-Ball Feedback from ${feedbackName.trim()}`,
           _replyto: feedbackEmail.trim() || undefined,
         }),
       })
@@ -249,7 +249,7 @@ export default function Lobby({ onStart, user }) {
             BETA
           </div>
           <p style={{ color: MUTED, fontSize: 15, margin: '0 0 40px', lineHeight: 1.6 }}>
-            8-ball pool in your browser.<br/>No download. No account.
+            Q-ball pool in your browser.<br/>No download. No account.
           </p>
         </div>
 

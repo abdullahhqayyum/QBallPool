@@ -1,6 +1,6 @@
-# 8-Ball Pool
+# Q-Ball Pool
 
-Browser-based 8-ball pool game — local, vs AI, or online multiplayer.
+Browser-based Q-ball pool game — local, vs AI, or online multiplayer.
 
 ## Stack
 - **Frontend**: React + Phaser 3 + Matter.js
@@ -198,6 +198,6 @@ If you want, I can also add a brief diagram or separate CONTRIBUTING/testing sec
 - [ ] Rack balls in triangle formation
 - [ ] Cue power charge bar (hold mouse)
 - [ ] Pocket collision detection
-- [ ] 8-ball win/loss rules
+- [ ] Q-ball win/loss rules
 - [ ] AI opponent (basic angle calculation)
 - [ ] Room ID sharing UI
