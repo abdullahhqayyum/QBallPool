@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react'
+import { Routes, Route, useNavigate, useLocation } from 'react-router-dom'
 import LobbyPage from './pages/LobbyPage'
 import GameCanvas from './components/GameCanvas'
-import MatchResult from './components/MatchResult'
 
-// Inject mobile-friendly global styles once
+// ── Global styles ────────────────────────────────────────────────────────────
 if (typeof document !== 'undefined') {
   let meta = document.querySelector('meta[name="viewport"]')
   if (!meta) {
@@ -26,14 +26,10 @@ if (typeof document !== 'undefined') {
     body.screen-locked { overflow: hidden; overscroll-behavior: none; height: 100%; }
     #root { width: 100%; min-height: 100dvh; }
     canvas { display: block !important; }
-  `
-  document.head.appendChild(style)
-  // Ensure the page is slightly taller than the viewport so we can trigger
-  // a small scroll to collapse mobile browser chrome (URL bar).
-  style.textContent += `
     html { height: 100%; }
     body { min-height: 101vh; }
   `
+  document.head.appendChild(style)
 }
 
 function makeGuest() {
@@ -41,17 +37,18 @@ function makeGuest() {
 }
 
 export default function App() {
-  const [screen,    setScreen]    = useState('lobby')
+  const navigate  = useNavigate()
+  const location  = useLocation()
   const [user,      setUser]      = useState(makeGuest)
   const [gameState, setGameState] = useState(null)
 
-  useEffect(() => {
-    document.body.classList.toggle('screen-game',   screen === 'game')
-    document.body.classList.toggle('screen-locked', screen !== 'game')
-  }, [screen])
+  const isGame = location.pathname === '/game'
 
-  // Nudge scroll to collapse mobile browser chrome (URL bar).
-  // Works on iOS Safari and Android Chrome; we do a tiny scroll then snap back.
+  useEffect(() => {
+    document.body.classList.toggle('screen-game',   isGame)
+    document.body.classList.toggle('screen-locked', !isGame)
+  }, [isGame])
+
   useEffect(() => {
     setTimeout(() => {
       window.scrollTo(0, 1)
@@ -59,18 +56,10 @@ export default function App() {
     }, 300)
   }, [])
 
-  // When switching to the game screen, nudge scroll again so the chrome
-  // collapses reliably when entering full-screen-like view.
   useEffect(() => {
-    if (screen === 'game') {
-      setTimeout(() => window.scrollTo(0, 1), 100)
-    }
-  }, [screen])
+    if (isGame) setTimeout(() => window.scrollTo(0, 1), 100)
+  }, [isGame])
 
-  // Request fullscreen on first user interaction (must be user-initiated).
-  // This hides the URL bar on supporting browsers. Note: iOS Safari
-  // doesn't implement the Fullscreen API — the Add-to-Home-Screen flow
-  // is required there.
   useEffect(() => {
     const requestFullscreen = () => {
       const el = document.documentElement
@@ -79,35 +68,52 @@ export default function App() {
       else if (el.mozRequestFullScreen)    el.mozRequestFullScreen()
       else if (el.msRequestFullscreen)     el.msRequestFullscreen()
     }
-
     document.addEventListener('touchstart', requestFullscreen, { once: true })
     document.addEventListener('click',      requestFullscreen, { once: true })
-
     return () => {
       document.removeEventListener('touchstart', requestFullscreen)
       document.removeEventListener('click',      requestFullscreen)
     }
   }, [])
 
-  function handleGameOver(outcome) {
+  function handleStart(state) {
+    setGameState(state?.user ? state : { ...state, user })
+    navigate('/game')
+  }
+
+  function handleGameOver() {
     setUser(makeGuest())
-    setScreen('lobby')
+    setGameState(null)
+    navigate('/home')
   }
 
   return (
-    <div>
-      {screen === 'lobby' && (
-        <LobbyPage
-          user={user}
-          onStart={(state) => {
-            setGameState(state?.user ? state : { ...state, user })
-            setScreen('game')
-          }}
-        />
-      )}
-      {screen === 'game' && (
-        <GameCanvas gameState={gameState} onGameOver={handleGameOver} />
-      )}
-    </div>
+    <Routes>
+      {/* Root redirects to /home */}
+      <Route path="/" element={<RedirectToHome />} />
+
+      <Route
+        path="/home"
+        element={<LobbyPage user={user} onStart={handleStart} />}
+      />
+
+      <Route
+        path="/game"
+        element={
+          gameState
+            ? <GameCanvas gameState={gameState} onGameOver={handleGameOver} />
+            : <RedirectToHome />
+        }
+      />
+
+      {/* Catch-all */}
+      <Route path="*" element={<RedirectToHome />} />
+    </Routes>
   )
+}
+
+function RedirectToHome() {
+  const navigate = useNavigate()
+  useEffect(() => { navigate('/home', { replace: true }) }, [])
+  return null
 }
