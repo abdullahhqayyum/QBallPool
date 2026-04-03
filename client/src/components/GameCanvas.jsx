@@ -249,14 +249,42 @@ export default function GameCanvas({ gameState, onGameOver }) {
         const scene = gameRef.current?.scene?.scenes?.[0]
         if (!scene) return
         setScene(scene)
-        setOnTurnDone((ballState) => {
+        setOnTurnDone((ballState, isMyTurn) => {
           const currentScene = gameRef.current?.scene?.scenes?.[0]
           if (!currentScene || !ballState) return
           import('../game/balls').then(({ rehydrateBalls }) => {
             rehydrateBalls(currentScene, ballState)
-            currentScene.registry.set('shotFired', false)
-            setWaitingForOpponent(false)
-            setMyTurn(true)
+            currentScene.registry.set('shotFired',            false)
+            currentScene.registry.set('ballsWereMoving',      false)
+            currentScene.registry.set('firstCueContactLabel', null)
+            currentScene.registry.set('firstContactMade',     false)
+            currentScene.registry.set('railHitAfterContact',  false)
+            currentScene.registry.set('pocketedThisTurn',     [])
+            currentScene.registry.set('foul',                 false)
+            currentScene.registry.set('placingCueBall',       false)
+            currentScene.registry.set('myTurn',               isMyTurn)
+
+            // If cue ball is pocketed in incoming state, give ball in hand to
+            // whoever's turn it now is (only if it's mine)
+            if (isMyTurn) {
+              const balls   = currentScene.registry.get('balls') || []
+              const cueBall = balls.find(b => b.label === 'cue')
+              if (cueBall?.pocketed) {
+                cueBall.pocketed = false
+                cueBall.vx = 0
+                cueBall.vy = 0
+                if (cueBall.gfx) cueBall.gfx.setVisible(true)
+                currentScene.registry.set('placingCueBall', true)
+                cueBall._placing = true
+              }
+            }
+
+            setWaitingForOpponent(!isMyTurn)
+            setMyTurn(isMyTurn)
+            setPlacingCueBall(isMyTurn && (() => {
+              const balls = currentScene.registry.get('balls') || []
+              return !!balls.find(b => b.label === 'cue' && b.pocketed)
+            })())
           })
         })
         setWaitingForOpponent(!scene.registry.get('myTurn'))

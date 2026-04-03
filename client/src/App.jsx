@@ -22,8 +22,8 @@ if (typeof document !== 'undefined') {
       -webkit-tap-highlight-color: transparent;
       touch-action: manipulation;
     }
-    body.screen-game   { overflow: auto;   overscroll-behavior: contain; }
-    body.screen-locked { overflow: hidden; overscroll-behavior: none; height: 100%; }
+    body.screen-game   { overflow: auto; overscroll-behavior: contain; }
+    body.screen-locked { overflow: auto; overscroll-behavior: contain; min-height: 100%; }
     #root { width: 100%; min-height: 100dvh; }
     canvas { display: block !important; }
     html { height: 100%; }
@@ -59,22 +59,6 @@ export default function App() {
   useEffect(() => {
     if (isGame) setTimeout(() => window.scrollTo(0, 1), 100)
   }, [isGame])
-
-  useEffect(() => {
-    const requestFullscreen = () => {
-      const el = document.documentElement
-      if (el.requestFullscreen)            el.requestFullscreen()
-      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen()
-      else if (el.mozRequestFullScreen)    el.mozRequestFullScreen()
-      else if (el.msRequestFullscreen)     el.msRequestFullscreen()
-    }
-    document.addEventListener('touchstart', requestFullscreen, { once: true })
-    document.addEventListener('click',      requestFullscreen, { once: true })
-    return () => {
-      document.removeEventListener('touchstart', requestFullscreen)
-      document.removeEventListener('click',      requestFullscreen)
-    }
-  }, [])
 
   function handleStart(state) {
     setGameState(state?.user ? state : { ...state, user })

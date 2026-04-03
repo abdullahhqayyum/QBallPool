@@ -13,8 +13,10 @@ export function connectSocket()    { socket.connect() }
 export function disconnectSocket() { socket.disconnect() }
 
 export function joinRoom(roomId, playerId, gameId) {
-  if (!socket.connected) socket.connect()
-  socket.emit('join_room', { roomId, playerId, gameId })
+  // Avoid repeated connect calls while a connection is already in progress.
+  if (!socket.connected && !socket.active) socket.connect()
+  // Server expects `code`; keep `roomId` too for compatibility/debugging.
+  socket.emit('join_room', { code: roomId, roomId, playerId, gameId })
 }
 
 export function sendTurnComplete(gameId, ballState, nextTurnPlayerId) {
@@ -27,14 +29,11 @@ export function sendGameOver(gameId, winnerId) {
 
 socket.on('turn_done', ({ nextTurnPlayerId, ballState }) => {
   if (!_scene) return
-
   const userId = _scene.registry.get('userId')
   const isMyTurn = nextTurnPlayerId === userId
-
   _scene.registry.set('myTurn', isMyTurn)
-
-  if (isMyTurn && _onTurnDone) {
-    _onTurnDone(ballState)
+  if (_onTurnDone) {
+    _onTurnDone(ballState, isMyTurn)   // ← always call, pass isMyTurn
   }
 })
 

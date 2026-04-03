@@ -7,25 +7,54 @@ function isUuid(value) {
 }
 
 function registerHandlers(io, socket) {
-  socket.on('join_room', async ({ roomId, playerId, gameId }) => {
-    const room   = RoomManager.getOrCreateRoom(roomId)
-    const joined = room.addPlayer(socket, playerId)
+  // ── HOST: just reserve the code — do NOT add player yet ─────────────────
+  socket.on('create_room', ({ code }) => {
+    const upper = (code || '').trim().toUpperCase()
+    const existing = RoomManager.getRoom(upper)
+    console.log(`[create_room] code=${upper} exists=${!!existing} socket=${socket.id}`)
+    if (!existing) RoomManager.createRoom(upper)
+    socket.emit('room_created', { code: upper })
+  })
 
-    if (!joined) {
-      socket.emit('error', { message: 'Room is full' })
+  // ── BOTH PLAYERS join via join_room ───────────────────────────────────────
+  socket.on('join_room', async ({ code, playerId, gameId }) => {
+    const upper = (code || '').trim().toUpperCase()
+    const room = RoomManager.getRoom(upper)
+
+    console.log(`[join_room] code=${upper} playerId=${playerId} socket=${socket.id} roomExists=${!!room} players=${room?.players?.length ?? 'N/A'}`)
+    if (room) {
+      console.log(`[join_room] current players:`, room.players.map(p => `${p.playerId}(${p.socketId})`))
+    }
+
+    if (!room) {
+      socket.emit('error', { message: 'Room not found. Check the code and try again.' })
       return
     }
 
-    socket.join(roomId)
-    socket.data.roomId   = roomId
+    const alreadyIn = room.players.some(p => p.playerId === playerId)
+    console.log(`[join_room] alreadyIn=${alreadyIn}`)
+    if (alreadyIn) {
+      socket.join(upper)
+      socket.data.roomId   = upper
+      socket.data.playerId = playerId
+      return
+    }
+
+    if (room.players.length >= 2) {
+      console.log(`[join_room] FULL — rejecting ${playerId}`)
+      socket.emit('error', { message: 'Room is already full.' })
+      return
+    }
+
+    room.addPlayer(socket, playerId)
+    socket.join(upper)
+    socket.data.roomId   = upper
     socket.data.playerId = playerId
     socket.data.gameId   = gameId
 
-    socket.emit('room_joined', {
-      roomId,
-      playerId,
-      isP1: room.players[0]?.socketId === socket.id,
-    })
+    console.log(`[join_room] ${playerId} joined ${upper} — now ${room.players.length}/2`)
+
+    socket.emit('room_joined', { roomId: upper, playerId, isP1: room.players.length === 1 })
 
     if (room.isReady()) {
       const p1Id = room.players[0]?.playerId
@@ -33,26 +62,24 @@ function registerHandlers(io, socket) {
 
       if (!isUuid(gameId)) {
         room.currentTurn = p1Id
-        io.to(roomId).emit('game_start', {
-          player1_id: p1Id,
-          player2_id: p2Id,
+        io.to(upper).emit('game_start', {
+          player1_id:   p1Id,
+          player2_id:   p2Id,
           current_turn: p1Id,
-          ballState: room.ballState,
+          ballState:    room.ballState,
         })
       } else {
         try {
-          const game = await getGame(gameId)
+          const game        = await getGame(gameId)
           const currentTurn = game.current_turn || p1Id
-
-          room.currentTurn = currentTurn
-
-          io.to(roomId).emit('game_start', {
-            player1_id: game.player1_id || p1Id,
-            player2_id: game.player2_id || p2Id,
+          room.currentTurn  = currentTurn
+          room.gameId       = gameId
+          io.to(upper).emit('game_start', {
+            player1_id:   game.player1_id || p1Id,
+            player2_id:   game.player2_id || p2Id,
             current_turn: currentTurn,
-            ballState: game.ball_state,
+            ballState:    game.ball_state,
           })
-          room.gameId = gameId
         } catch (err) {
           console.error('Failed to load game:', err)
         }
