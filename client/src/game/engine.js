@@ -118,9 +118,7 @@ function sceneCreate(gameState) {
     createBalls(this)
   }
 
-  const myTurn = isOnline
-    ? game?.current_turn === userId
-    : (gameState?.mode === 'ai' ? (Math.random() < 0.5) : true)
+  const myTurn = isOnline ? game?.current_turn === userId : true
 
   this.registry.set('myTurn',               myTurn)
   this.registry.set('ballsWereMoving',      false)
@@ -147,7 +145,7 @@ function sceneCreate(gameState) {
 
   // Whether the opening break shot has been taken (prevents assigning types on the break)
   // blocks assignment for break shot + its resulting turn-end
-  this.registry.set('breakShotsRemaining', 2)
+  this.registry.set('breakDone', false)
 
   if (isRejoin && game?.my_type) {
     this.registry.set('myType',  game.my_type)
@@ -308,21 +306,23 @@ function sceneUpdate() {
   }
 
   // ── AI turn trigger ──
-  const mode   = this.registry.get('mode')
-  if (
-    mode === 'ai' &&
-    !myTurn &&
-    !this._aiThinking
-  ) {
-    if (this.registry.get('placingCueBall')) {
-      triggerAIPlacement(this)
-    } else if (
-      !this.registry.get('shotFired') &&
-      !this.registry.get('ballsWereMoving')
-    ) {
-      triggerAIShot(this)
+  // replace the AI trigger block:
+  // ── AI turn trigger ──
+  const mode = this.registry.get('mode')
+  if (mode === 'ai' && !this._aiThinking) {
+    const aiTurn = !this.registry.get('myTurn')   // ← read fresh, not cached
+    if (aiTurn) {
+      if (this.registry.get('placingCueBall')) {
+        triggerAIPlacement(this)
+      } else if (
+        !this.registry.get('shotFired') &&
+        !this.registry.get('ballsWereMoving')
+      ) {
+        triggerAIShot(this)
+      }
     }
   }
+  // ── end AI trigger ──
   // ── end AI trigger ──
 }
 
@@ -404,14 +404,17 @@ function handleTurnEnd(scene) {
   const expectedType = currentlyMine ? currentMyType : currentOppType
 
   // ── Break guard — skip ALL type assignment and foul logic for the opening shot ──
-  const breakShotsRemaining = scene.registry.get('breakShotsRemaining') ?? 0
-  if (breakShotsRemaining > 0) {
-    scene.registry.set('breakShotsRemaining', breakShotsRemaining - 1)
-    if (scratched || objectBalls.length === 0) {
+  const breakDone = scene.registry.get('breakDone')
+  if (!breakDone) {
+    scene.registry.set('breakDone', true)   // only blocks the ONE opening break turn-end
+    if (scratched) {
+      switchTurn(scene)
+      respawnCueBall(scene, () => notify(scene, { switched: true, foul: true, ballInHand: true }))
+    } else if (objectBalls.length === 0) {
       switchTurn(scene)
       notify(scene, { switched: true, foul: false })
     } else {
-      // Pocketed on the break — keep turn, no type assigned yet
+      // Pocketed on break — keep turn, no type assigned yet
       notify(scene, { switched: false, foul: false })
     }
     return
@@ -537,6 +540,10 @@ function handleTurnEnd(scene) {
 }
 function switchTurn(scene) {
   scene.registry.set('myTurn', !scene.registry.get('myTurn'))
+  // Clear any stale AI thinking lock so CPU can respond immediately
+  try {
+    scene._aiThinking = false
+  } catch (e) {}
 }
 
 function notify(scene, payload) {
