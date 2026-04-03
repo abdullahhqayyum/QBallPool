@@ -12,6 +12,8 @@ export const initialGameState = {
   winner:      null,
   gameId:      null,
   user:        null,
+  cheatUsed:       false,   // ← NEW: has this player used their cheat
+  cheatAvailable:  false,   // ← NEW: is the cheat button currently usable
 }
 
 export function useGameStore(initial = {}) {
@@ -34,7 +36,18 @@ export function useGameStore(initial = {}) {
   const setCalledPocket = useCallback((pocketId) => setState(s => ({ ...s, calledPocket: pocketId })), [])
   const setSelectingPocket = useCallback((val) => setState(s => ({ ...s, selectingPocket: val })), [])
 
-  return { state, setTurn, setWinner, setFoul, setMyType, addPocketed, setCalledPocket, setSelectingPocket }
+  return {
+    state,
+    setTurn,
+    setWinner,
+    setFoul,
+    setMyType,
+    addPocketed,
+    setCalledPocket,
+    setSelectingPocket,
+    cheatUsed: state.cheatUsed,
+    cheatAvailable: state.cheatAvailable,
+  }
 }
 
 // Lightweight global accessors so non-React code (engine) can read/update
@@ -50,6 +63,16 @@ useGameStore.setCalledPocket = (pocketId) => {
 }
 useGameStore.setSelectingPocket = (val) => {
   GLOBAL_STATE = { ...GLOBAL_STATE, selectingPocket: val }
+  subscribers.forEach(s => s(GLOBAL_STATE))
+}
+
+useGameStore.setCheatAvailable = (val) => {
+  GLOBAL_STATE = { ...GLOBAL_STATE, cheatAvailable: val }
+  subscribers.forEach(s => s(GLOBAL_STATE))
+}
+
+useGameStore.setCheatUsed = () => {
+  GLOBAL_STATE = { ...GLOBAL_STATE, cheatUsed: true, cheatAvailable: false }
   subscribers.forEach(s => s(GLOBAL_STATE))
 }
 

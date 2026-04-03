@@ -100,6 +100,128 @@ export function destroyEngine(game) {
 }
 
 // ---------------------------------------------------------------------------
+// Rewind recording + playback
+// ---------------------------------------------------------------------------
+
+/** Start fresh recording for a new shot */
+export function startRecording(scene) {
+  scene._rewindFrames = []
+  scene._rewindRecording = true
+}
+
+/** Append one frame — called every sceneUpdate while recording */
+function recordFrame(scene) {
+  if (!scene._rewindRecording) return
+  if (!scene.registry.get('shotFired')) return
+  const balls = scene.registry.get('balls') || []
+  // Store only positions — velocity not needed for visual playback
+  scene._rewindFrames.push(
+    balls.map(b => ({ x: b.x, y: b.y, pocketed: b.pocketed }))
+  )
+}
+
+/** Discard recording on normal turn end */
+export function discardRecording(scene) {
+  scene._rewindFrames    = null
+  scene._rewindRecording = false
+}
+
+/** Snapshot ball state before the shot for restoration after rewind */
+let _preCheatSnapshot = null
+
+export function snapshotForCheat(scene) {
+  const balls = (scene.registry.get('balls') || []).map(b => ({
+    label: b.label, x: b.x, y: b.y, vx: 0, vy: 0, pocketed: b.pocketed,
+  }))
+  _preCheatSnapshot = {
+    balls,
+    myTurn: scene.registry.get('myTurn'),
+  }
+}
+
+/**
+ * Play back recorded frames in reverse, then restore pre-shot state.
+ * `onComplete` is called when the animation finishes (used to trigger confetti).
+ */
+export function useCheat(scene, onComplete) {
+  if (!_preCheatSnapshot) return
+
+  const frames = scene._rewindFrames || []
+  scene._rewindRecording = false   // stop recording immediately
+  scene._rewindFrames    = null
+
+  // Freeze physics during rewind
+  scene._rewindPlaying = true
+  scene.registry.set('shotFired',       false)
+  scene.registry.set('ballsWereMoving', false)
+
+  const reversed   = frames.slice().reverse()
+  const totalFrames = reversed.length
+  if (totalFrames === 0) {
+    _finishCheat(scene, onComplete)
+    return
+  }
+
+  const DURATION_MS = Math.min(700, Math.max(300, totalFrames * 6))
+  const startTime   = performance.now()
+  const balls       = scene.registry.get('balls') || []
+
+  function step(now) {
+    if (!scene._rewindPlaying) return  // cancelled
+
+    const elapsed  = now - startTime
+    const progress = Math.min(1, elapsed / DURATION_MS)
+    // Ease-in so it starts fast and slows as it reaches origin
+    const eased    = 1 - Math.pow(1 - progress, 2)
+    const frameIdx = Math.min(totalFrames - 1, Math.floor(eased * totalFrames))
+    const snap     = reversed[frameIdx]
+
+    balls.forEach((b, i) => {
+      if (!snap[i]) return
+      b.x = snap[i].x
+      b.y = snap[i].y
+      b.vx = 0
+      b.vy = 0
+      if (b.gfx && !b.pocketed) b.gfx.setPosition(b.x, b.y)
+    })
+
+    if (progress < 1) {
+      requestAnimationFrame(step)
+    } else {
+      _finishCheat(scene, onComplete)
+    }
+  }
+
+  requestAnimationFrame(step)
+}
+
+function _finishCheat(scene, onComplete) {
+  const { balls: snap, myTurn } = _preCheatSnapshot
+  _preCheatSnapshot    = null
+  scene._rewindPlaying = false
+
+  // Full state restore
+  rehydrateBalls(scene, snap)
+
+  scene.registry.set('shotFired',            false)
+  scene.registry.set('ballsWereMoving',      false)
+  scene.registry.set('firstContactMade',     false)
+  scene.registry.set('firstCueContactLabel', null)
+  scene.registry.set('railHitAfterContact',  false)
+  scene.registry.set('pocketedThisTurn',     [])
+  scene.registry.set('foul',                 false)
+  scene.registry.set('myTurn',               myTurn)
+  scene.registry.set('cheatUsed',            true)
+  scene.registry.set('cheatAvailable',       false)
+
+  useGameStore.setCheatUsed()
+  useGameStore.setCheatAvailable(false)
+
+  resetCue(scene)
+  if (onComplete) onComplete()
+}
+
+// ---------------------------------------------------------------------------
 // Scene create
 // ---------------------------------------------------------------------------
 function sceneCreate(gameState) {
@@ -141,6 +263,11 @@ function sceneCreate(gameState) {
   )
   this.registry.set('wrongFirstContact', false)
 
+  this.registry.set('cheatUsed',      false)
+  this.registry.set('cheatAvailable', false)
+  this._rewindFrames    = null
+  this._rewindRecording = false
+  this._rewindPlaying   = false
   this.registry.set('pendingResult', null)
 
   // Whether the opening break shot has been taken (prevents assigning types on the break)
@@ -205,6 +332,12 @@ setupCue(this, (angle, power) => {
 // Scene update — pure JS physics, no Matter
 // ---------------------------------------------------------------------------
 function sceneUpdate() {
+  // Don't run physics or logic while rewind animation is playing
+  if (this._rewindPlaying) return
+
+  // Record frame if a shot is in progress
+  recordFrame(this)
+
   const balls = this.registry.get('balls') || []
 
   // Reset per-frame collision tags
@@ -276,6 +409,11 @@ function sceneUpdate() {
   const shotFired = this.registry.get('shotFired')
 
   if (shotFired && wasMoving && !moving) {
+    // Balls stopped — close cheat window and discard recording
+    useGameStore.setCheatAvailable(false)
+    this.registry.set('cheatAvailable', false)
+    discardRecording(this)
+
     const diag = this.registry.get('__collisionDiag')
     if (diag?.enabled) {
       finalizeDiagnosticShot(this)
@@ -288,7 +426,6 @@ function sceneUpdate() {
     this.registry.set('ballsWereMoving', false)
     this.registry.set('shotFired',       false)
 
-    // 8-ball was pocketed this shot — resolve immediately, skip turn-end foul logic
     const pending = this.registry.get('pendingResult')
     if (pending) {
       this.registry.set('pendingResult', null)
@@ -297,12 +434,39 @@ function sceneUpdate() {
       return
     }
 
-      handleTurnEnd(this)
-      return
+    handleTurnEnd(this)
+    return
   }
 
   if (shotFired && moving) {
     this.registry.set('ballsWereMoving', true)
+
+    // Open cheat window once balls are moving (only if not yet used)
+    if (!this.registry.get('cheatUsed') && !this.registry.get('cheatAvailable')) {
+      this.registry.set('cheatAvailable', true)
+      useGameStore.setCheatAvailable(true)
+    }
+  }
+
+  if (shotFired && moving) {
+    this.registry.set('ballsWereMoving', true)
+
+    // Open cheat window once balls are moving (only if not yet used)
+    if (!this.registry.get('cheatUsed') && !this.registry.get('cheatAvailable')) {
+      this.registry.set('cheatAvailable', true)
+      useGameStore.setCheatAvailable(true)
+    }
+  }
+
+  if (shotFired && moving) {
+    this.registry.set('ballsWereMoving', true)
+
+    // Open the cheat window once balls are actually in motion
+    // (only if this player hasn't used their cheat yet)
+    if (!this.registry.get('cheatUsed') && !this.registry.get('cheatAvailable')) {
+      this.registry.set('cheatAvailable', true)
+      useGameStore.setCheatAvailable(true)
+    }
   }
 
   // ── AI turn trigger ──

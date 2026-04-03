@@ -1,9 +1,80 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useGameStore } from '../store/gameStore'
-import { initEngine, destroyEngine } from '../game/engine'
+import { initEngine, destroyEngine, snapshotForCheat, useCheat } from '../game/engine'
 import MatchResult from './MatchResult'
 import PocketCallModal from './PocketCallModal'
 import { setSpin, getSpin } from '../game/cue'
+
+function Confetti({ active }) {
+  const canvasRef = useRef(null)
+  const animRef   = useRef(null)
+
+  useEffect(() => {
+    if (!active) return
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx    = canvas.getContext('2d')
+    canvas.width  = canvas.offsetWidth
+    canvas.height = canvas.offsetHeight
+
+    const pieces = Array.from({ length: 80 }, () => ({
+      x:    Math.random() * canvas.width,
+      y:    Math.random() * canvas.height * 0.4,
+      vx:   (Math.random() - 0.5) * 4,
+      vy:   Math.random() * 3 + 1,
+      rot:  Math.random() * Math.PI * 2,
+      vrot: (Math.random() - 0.5) * 0.2,
+      w:    6 + Math.random() * 6,
+      h:    3 + Math.random() * 4,
+      color: ['#ff5500','#ffdd00','#00cc66','#3399ff','#ff44aa','#ffffff'][Math.floor(Math.random() * 6)],
+      life: 1,
+    }))
+
+    const tick = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      let alive = false
+      for (const p of pieces) {
+        p.x   += p.vx
+        p.y   += p.vy
+        p.vy  += 0.07
+        p.rot += p.vrot
+        p.life -= 0.012
+        if (p.life <= 0) continue
+        alive = true
+        ctx.save()
+        ctx.globalAlpha = p.life
+        ctx.translate(p.x, p.y)
+        ctx.rotate(p.rot)
+        ctx.fillStyle = p.color
+        ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h)
+        ctx.restore()
+      }
+      if (alive) animRef.current = requestAnimationFrame(tick)
+    }
+
+    animRef.current = requestAnimationFrame(tick)
+
+    return () => {
+      if (animRef.current) cancelAnimationFrame(animRef.current)
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+    }
+  }, [active])
+
+  if (!active) return null
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{
+        position: 'absolute',
+        inset: 0,
+        width: '100%',
+        height: '100%',
+        pointerEvents: 'none',
+        zIndex: 30,
+      }}
+    />
+  )
+}
 
 function getBallColor(n) {
   const colors = {
@@ -99,6 +170,10 @@ export default function GameCanvas({ gameState, onGameOver }) {
   const [pocketed, setPocketed] = useState([])
   const [foul,     setFoul]     = useState(false)
   const [result,   setResult]   = useState(null)
+
+  const [cheatAvailable, setCheatAvailable] = useState(false)
+  const [cheatUsed,      setCheatUsed]      = useState(false)
+  const [showConfetti,   setShowConfetti]   = useState(false)
 
   const [spin, setSpin_] = useState({ x: 0, y: 0 })
 
@@ -219,6 +294,8 @@ export default function GameCanvas({ gameState, onGameOver }) {
       const type = scene.registry.get('myType')
       if (type) setMyType(type)
       setPlacingCueBall(!!scene.registry.get('placingCueBall'))
+      setCheatAvailable(!!scene.registry.get('cheatAvailable') && !scene.registry.get('cheatUsed'))
+      setCheatUsed(!!scene.registry.get('cheatUsed'))
       if (scene.registry.get('opponentDisconnected')) setOpponentDisconnected(true)
 
       const pocketedLabels = (scene.registry.get('balls') || [])
@@ -271,6 +348,18 @@ export default function GameCanvas({ gameState, onGameOver }) {
     setSpin_(next)
   }
 
+  function handleCheat() {
+    if (cheatUsed || !cheatAvailable) return
+    const scene = gameRef.current?.scene?.scenes?.[0]
+    if (!scene) return
+    useCheat(scene, () => {
+      setShowConfetti(true)
+      setTimeout(() => setShowConfetti(false), 2800)
+    })
+    setCheatAvailable(false)
+    setCheatUsed(true)
+  }
+
   if (result) {
     return (
       <MatchResult
@@ -299,6 +388,12 @@ export default function GameCanvas({ gameState, onGameOver }) {
       overflowY:          'hidden',
       overscrollBehavior: 'contain',
     }}>
+      <style>{`
+        @keyframes cheatPulse {
+          0%, 100% { box-shadow: 0 0 6px #ff550055; }
+          50%       { box-shadow: 0 0 14px #ff5500cc; border-color: #ff8844; }
+        }
+      `}</style>
       {/* Canvas wrapper — no extra borders; all visuals are inside Phaser */}
       <div style={{ position: 'relative', lineHeight: 0, touchAction: 'none', maxHeight: canvasMaxH, width: '100%', overflow: 'hidden' }}>
         <div
@@ -313,6 +408,8 @@ export default function GameCanvas({ gameState, onGameOver }) {
             outline:    'none',
           }}
         />
+
+        <Confetti active={showConfetti} />
 
         {waitingForOpponent && (
           <div style={{
@@ -395,7 +492,7 @@ export default function GameCanvas({ gameState, onGameOver }) {
           })}
         </div>
 
-        {/* Turn indicator */}
+        {/* Turn indicator + cheat */}
         <div style={{ textAlign: 'center', flexShrink: 0 }}>
           {foul && <div style={{ color: '#ff4444', fontSize: 9, marginBottom: 2 }}>FOUL</div>}
           {placingCueBall && (
@@ -417,6 +514,39 @@ export default function GameCanvas({ gameState, onGameOver }) {
                 ? (myTurn ? 'YOUR TURN' : 'CPU...')
                 : (myTurn ? 'P1 TURN' : 'P2 TURN')}
             </div>
+
+            {/* Cheat button */}
+            <button
+              title={cheatUsed ? 'Cheat already used' : cheatAvailable ? 'Undo this shot!' : 'Available while ball is rolling'}
+              onClick={handleCheat}
+              style={{
+                cursor:       cheatAvailable && !cheatUsed ? 'pointer' : 'default',
+                background:   cheatUsed      ? '#111'
+                            : cheatAvailable ? '#7a1f00'
+                            : '#1c1c1c',
+                border:       cheatAvailable && !cheatUsed
+                                ? '2px solid #ff5500'
+                                : '2px solid #333',
+                borderRadius: 8,
+                padding:      '3px 8px',
+                color:        cheatUsed      ? '#333'
+                            : cheatAvailable ? '#fff'
+                            : '#3a3a3a',
+                fontSize:     13,
+                fontFamily:   'monospace',
+                fontWeight:   'bold',
+                display:      'flex',
+                alignItems:   'center',
+                gap:          3,
+                boxShadow:    cheatAvailable && !cheatUsed ? '0 0 10px #ff550066' : 'none',
+                transition:   'all 0.2s',
+                animation:    cheatAvailable && !cheatUsed ? 'cheatPulse 1s ease-in-out infinite' : 'none',
+              }}
+            >
+              <span style={{ fontSize: 14 }}>{cheatUsed ? '🚫' : '⏪'}</span>
+              <span style={{ fontSize: 9, letterSpacing: 1 }}>{cheatUsed ? 'USED' : 'CHEAT'}</span>
+            </button>
+
             <div style={{ display: 'flex', alignItems: 'center', height: 36 }}>
               <SpinPicker size={36} spin={spin} onChange={handleSpinChange} />
             </div>

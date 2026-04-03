@@ -1,6 +1,7 @@
 import { CUE, BALL, TABLE } from './constants'
 import { useGameStore } from "../store/gameStore"
-import { getCanvasScale } from './engine'
+import { getCanvasScale, snapshotForCheat, startRecording } from './engine'
+
 
 let aimLine        = null
 let powerBar       = null
@@ -119,6 +120,8 @@ export function setupCue(scene, onShoot) {
 
     const angle = firedAngle !== null ? firedAngle : Math.atan2(cueBall.y - shotPoint.y, cueBall.x - shotPoint.x)
 
+    snapshotForCheat(scene)   // ← NEW: save state before shot executes
+    startRecording(scene)
     scene.registry.set('firstCueContactLabel', null)
     scene.registry.set('shotFired', true)
     shootCue(scene, angle, power)

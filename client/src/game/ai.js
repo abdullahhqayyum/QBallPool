@@ -21,6 +21,21 @@ export function triggerAIShot(scene) {
 
   setTimeout(() => {
     scene._aiThinking = false
+
+    // AI cheat: if cheat is available and AI hasn't used it, 30% chance it cheats
+    // (only on hard difficulty — easy/medium AI doesn't bother)
+    const aiDifficulty = scene.registry.get('aiDifficulty') || 'medium'
+    if (
+      scene.registry.get('cheatAvailable') &&
+      !scene.registry.get('cheatUsed') &&
+      aiDifficulty === 'hard' &&
+      Math.random() < 0.30
+    ) {
+      // Import lazily to avoid circular dep — engine imports ai, ai imports engine
+      import('./engine').then(({ useCheat }) => useCheat(scene))
+      return
+    }
+
     if (scene.registry.get('shotFired'))      return
     if (scene.registry.get('placingCueBall')) return
 
