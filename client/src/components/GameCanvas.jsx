@@ -319,7 +319,9 @@ export default function GameCanvas({ gameState, onGameOver }) {
             })())
           })
         })
-        setWaitingForOpponent(!scene.registry.get('myTurn'))
+        const initialMyTurn = gameState?.game?.current_turn === gameState?.user?.id
+        setWaitingForOpponent(!initialMyTurn)
+        scene.registry.set('myTurn', initialMyTurn)
         joinRoom(gameState.game.id, gameState.user.id, gameState.game.id)
       })
     }
