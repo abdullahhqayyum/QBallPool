@@ -557,6 +557,16 @@ function handleTurnEnd(scene) {
   const currentOppType       = scene.registry.get('oppType')
   const currentlyMine        = scene.registry.get('myTurn')
 
+  const handleFoulBallInHand = () => {
+    const isOnline = scene.registry.get('mode') === 'online'
+    if (isOnline) {
+      respawnCueBall(scene, null)  // moves cue to center first
+      scene.registry.set('placingCueBall', true)
+      notify(scene, { switched: true, foul: true, ballInHand: true })  // ball state now has valid position
+    } else {
+      respawnCueBall(scene, () => notify(scene, { switched: true, foul: true, ballInHand: true }))
+    }
+  }
   scene.registry.set('pocketedThisTurn',    [])
   resetCue(scene)
   scene.registry.set('firstContactMade',     false)
@@ -573,7 +583,7 @@ function handleTurnEnd(scene) {
     scene.registry.set('breakDone', true)   // only blocks the ONE opening break turn-end
     if (scratched) {
       switchTurn(scene)
-      respawnCueBall(scene, () => notify(scene, { switched: true, foul: true, ballInHand: true }))
+      handleFoulBallInHand()
     } else if (objectBalls.length === 0) {
       switchTurn(scene)
       notify(scene, { switched: true, foul: false })
@@ -588,21 +598,21 @@ function handleTurnEnd(scene) {
   if (scratched) {
     scene.registry.set('foul', true)
     switchTurn(scene)
-    respawnCueBall(scene, () => notify(scene, { switched: true, foul: true, ballInHand: true }))
+    handleFoulBallInHand()
     return
   }
 
   if (!firstContactMade) {
     scene.registry.set('foul', true)
     switchTurn(scene)
-    respawnCueBall(scene, () => notify(scene, { switched: true, foul: true, ballInHand: true }))
+    handleFoulBallInHand()
     return
   }
 
   if (firstContactMade && !railHitAfterContact && objectBalls.length === 0) {
     scene.registry.set('foul', true)
     switchTurn(scene)
-    respawnCueBall(scene, () => notify(scene, { switched: true, foul: true, ballInHand: true }))
+    handleFoulBallInHand()
     return
   }
 
@@ -612,7 +622,7 @@ function handleTurnEnd(scene) {
     if (!firstCueContactLabel) {
       scene.registry.set('foul', true)
       switchTurn(scene)
-      respawnCueBall(scene, () => notify(scene, { switched: true, foul: true, ballInHand: true }))
+      handleFoulBallInHand()
       return
     }
 
@@ -623,7 +633,7 @@ function handleTurnEnd(scene) {
     if (!firstType) {
       scene.registry.set('foul', true)
       switchTurn(scene)
-      respawnCueBall(scene, () => notify(scene, { switched: true, foul: true, ballInHand: true }))
+      handleFoulBallInHand()
       return
     }
 
@@ -638,7 +648,7 @@ function handleTurnEnd(scene) {
     if (firstContactFoul) {
       scene.registry.set('foul', true)
       switchTurn(scene)
-      respawnCueBall(scene, () => notify(scene, { switched: true, foul: true, ballInHand: true }))
+      handleFoulBallInHand()
       return
     }
   }
@@ -722,8 +732,10 @@ function notify(scene, payload) {
 
   if (mode === 'online' && gameId && userId && opponentId) {
     const nextTurnPlayerId = myTurnNow ? userId : opponentId
+    const ballInHand = !!scene.registry.get('placingCueBall')
+    console.log('[notify] mode:', mode, 'ballInHand:', !!scene.registry.get('placingCueBall'), 'myTurnNow:', myTurnNow)
     import('../socket/client').then(({ sendTurnComplete }) => {
-      sendTurnComplete(gameId, ballState, nextTurnPlayerId)
+      sendTurnComplete(gameId, ballState, nextTurnPlayerId, ballInHand)
     })
   }
 
@@ -758,7 +770,7 @@ function isValidCuePlacement(scene, cueBall, x, y) {
   return true
 }
 
-function respawnCueBall(scene, onPlaced, kitchenOnly = false) {
+export function respawnCueBall(scene, onPlaced, kitchenOnly = false) {
   const balls   = scene.registry.get('balls') || []
   const cueBall = balls.find(b => b.label === 'cue')
   if (!cueBall) return

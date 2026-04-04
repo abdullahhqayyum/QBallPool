@@ -19,21 +19,23 @@ export function joinRoom(roomId, playerId, gameId) {
   socket.emit('join_room', { code: roomId, roomId, playerId, gameId })
 }
 
-export function sendTurnComplete(gameId, ballState, nextTurnPlayerId) {
-  socket.emit('turn_complete', { gameId, ballState, nextTurnPlayerId })
+export function sendTurnComplete(gameId, ballState, nextTurnPlayerId, ballInHand) {
+  socket.emit('turn_complete', { gameId, ballState, nextTurnPlayerId, ballInHand })
 }
 
 export function sendGameOver(gameId, winnerId) {
   socket.emit('game_over', { gameId, winnerId })
 }
 
-socket.on('turn_done', ({ nextTurnPlayerId, ballState }) => {
+socket.on('turn_done', ({ nextTurnPlayerId, ballState, ballInHand }) => {
+  console.log('[turn_done received] nextTurnPlayerId:', nextTurnPlayerId, 'userId:', _scene?.registry.get('userId'), 'ballInHand:', ballInHand)
   if (!_scene) return
   const userId = _scene.registry.get('userId')
   const isMyTurn = nextTurnPlayerId === userId
+  console.log('[turn_done received] isMyTurn:', isMyTurn, 'ballInHand:', ballInHand)
   _scene.registry.set('myTurn', isMyTurn)
   if (_onTurnDone) {
-    _onTurnDone(ballState, isMyTurn)   // ← always call, pass isMyTurn
+    _onTurnDone(ballState, isMyTurn, ballInHand)
   }
 })
 

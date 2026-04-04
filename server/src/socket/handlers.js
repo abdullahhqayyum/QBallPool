@@ -87,7 +87,8 @@ function registerHandlers(io, socket) {
     }
   })
 
-  socket.on('turn_complete', async ({ gameId, ballState, nextTurnPlayerId }) => {
+  socket.on('turn_complete', async ({ gameId, ballState, nextTurnPlayerId, ballInHand }) => {
+    console.log('[turn_complete] received, ballInHand:', ballInHand, 'nextTurn:', nextTurnPlayerId)
     const roomId = socket.data.roomId
     if (!roomId) return
 
@@ -120,6 +121,7 @@ function registerHandlers(io, socket) {
       socket.to(roomId).emit('turn_done', {
         nextTurnPlayerId,
         ballState,
+        ballInHand: !!ballInHand,
       })
     } catch (err) {
       console.error('Failed to save turn:', err)
