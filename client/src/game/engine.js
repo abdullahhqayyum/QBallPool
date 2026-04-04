@@ -1,7 +1,7 @@
 import Phaser from 'phaser'
 import { createBalls, rehydrateBalls, syncBallGraphics, areBallsMoving, getBallState } from './balls'
 import { stepPhysics, drawTable, checkPockets } from './physics'
-import { setupCue, resetCue, shootCue, predictCueFirstContact } from './cue'
+import { setupCue, resetCue, shootCue, predictCueFirstContact, clientToGame } from './cue'
 import { TABLE, BALL, POCKET } from './constants'
 import { useGameStore } from '../store/gameStore'
 import { triggerAIShot, triggerAIPlacement } from './ai'
@@ -538,7 +538,7 @@ function handlePocket(scene, ball) {
 
     const shooterType  = myTurn ? myType : oppType
     const shooterBalls = balls.filter(b => b.type === shooterType)
-    const allCleared   = shooterBalls.every(b => b.pocketed)
+    const allCleared   = shooterBalls.length > 0 && shooterBalls.every(b => b.pocketed)
 
     if (!allCleared) {
       scene.registry.set('pendingResult', myTurn ? 'loss' : 'win')
@@ -833,23 +833,37 @@ export function respawnCueBall(scene, onPlaced, kitchenOnly = false) {
     scene.registry.set('kitchenOnly', false)
   }
 
-  // TO:
-  const downHandler = (ptr) => {
-    if (Math.hypot(ptr.x - cueBall.x, ptr.y - cueBall.y) > BALL.radius * 3) {
-      // Clicked away from cue ball — confirm placement where it is and let cue.js handle the shot
-      cleanup()
-      scene.registry.set('placingCueBall', false)
-      cueBall._placing = false
-      scene._suppressShotUntil = Date.now() + 120
-      return
+  const pointerToGame = (ptr) => {
+    const native = ptr?.event
+    const touch  = native?.changedTouches?.[0] ?? native?.touches?.[0]
+    const client = touch ?? native
+    if (client?.clientX !== undefined) {
+      return clientToGame(scene, client.clientX, client.clientY)
     }
+    return { x: ptr.x, y: ptr.y }
+  }
+
+  const downHandler = (ptr) => {
+    const gp = pointerToGame(ptr)
+
     dragging = true
     scene.registry.set('placingCueBall', true)
     scene.registry.set('kitchenOnly', (scene.registry.get('breakShotsRemaining') ?? 0) > 0)
+
+    const pos = clampToTable(gp.x, gp.y)
+    cueBall.x = pos.x
+    cueBall.y = pos.y
+    if (cueBall.gfx) {
+      cueBall.gfx.setPosition(pos.x, pos.y)
+      cueBall.gfx.setVisible(true)
+    }
+    updateTint(isValidCuePlacement(scene, cueBall, pos.x, pos.y))
   }
+
   const moveHandler = (ptr) => {
     if (!dragging) return
-    const pos = clampToTable(ptr.x, ptr.y)
+    const gp = pointerToGame(ptr)
+    const pos = clampToTable(gp.x, gp.y)
     cueBall.x = pos.x
     cueBall.y = pos.y
     if (cueBall.gfx) cueBall.gfx.setPosition(pos.x, pos.y)
@@ -860,7 +874,8 @@ export function respawnCueBall(scene, onPlaced, kitchenOnly = false) {
     if (!dragging) return
     dragging = false
 
-    const pos   = clampToTable(ptr.x, ptr.y)
+    const gp    = pointerToGame(ptr)
+    const pos   = clampToTable(gp.x, gp.y)
     const valid = isValidCuePlacement(scene, cueBall, pos.x, pos.y)
 
     if (valid) {
@@ -871,21 +886,19 @@ export function respawnCueBall(scene, onPlaced, kitchenOnly = false) {
       if (cueBall.gfx) { cueBall.gfx.setPosition(pos.x, pos.y); cueBall.gfx.setVisible(true) }
       lastValidPos = { x: pos.x, y: pos.y }
       updateTint(true)
-      scene.registry.set('placingCueBall', false)
-      cueBall._placing = false
-      scene.registry.set('kitchenOnly', false)
-      scene._suppressShotUntil = Date.now() + 120
     } else {
       // Snap back to last valid spot (or keep hidden if never placed)
       cueBall.x = lastValidPos.x
       cueBall.y = lastValidPos.y
       if (cueBall.gfx) { cueBall.gfx.setPosition(lastValidPos.x, lastValidPos.y); cueBall.gfx.setVisible(true) }
       updateTint(true)
-      scene.registry.set('placingCueBall', false)
-      cueBall._placing = false
-      scene.registry.set('kitchenOnly', false)
-      scene._suppressShotUntil = Date.now() + 120
     }
+
+    scene.registry.set('placingCueBall', false)
+    cueBall._placing = false
+    scene.registry.set('kitchenOnly', false)
+    scene._suppressShotUntil = Date.now() + 120
+    cleanup()
   }
 
   scene.input.on('pointerdown', downHandler)

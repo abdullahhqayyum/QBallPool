@@ -84,9 +84,9 @@ export default function HUD({ gameState, pocketed, myType, myTurn, foul }) {
 function getBallColor(n) {
   const colors = {
     1: '#f5c518', 2: '#1a66cc', 3: '#ff3300', 4: '#6600cc',
-    5: '#ff6600', 6: '#006600', 7: '#990000',
+    5: '#ff6600', 6: '#00aa44', 7: '#990000',
     9: '#f5c518', 10: '#1a66cc', 11: '#ff3300', 12: '#6600cc',
-    13: '#ff6600', 14: '#006600', 15: '#990000',
+    13: '#ff6600', 14: '#00aa44', 15: '#990000',
   }
   return colors[n] || '#888'
 }

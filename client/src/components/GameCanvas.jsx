@@ -79,9 +79,9 @@ function Confetti({ active }) {
 function getBallColor(n) {
   const colors = {
     1: '#f5c518', 2: '#1a66cc', 3: '#ff3300', 4: '#6600cc',
-    5: '#ff6600', 6: '#006600', 7: '#990000',
+    5: '#ff6600', 6: '#00aa44', 7: '#990000',
     9: '#f5c518', 10: '#1a66cc', 11: '#ff3300', 12: '#6600cc',
-    13: '#ff6600', 14: '#006600', 15: '#990000',
+    13: '#ff6600', 14: '#00aa44', 15: '#990000',
   }
   return colors[n] || '#888'
 }
@@ -365,8 +365,8 @@ export default function GameCanvas({ gameState, onGameOver }) {
       const balls     = scene.registry.get('balls') || []
       const moving    = balls.some(b =>
         !b.pocketed && (
-          Math.abs(b.body?.velocity?.x || 0) > 0.05 ||
-          Math.abs(b.body?.velocity?.y || 0) > 0.05
+          Math.abs(b.vx || 0) > 0.05 ||
+          Math.abs(b.vy || 0) > 0.05
         )
       )
 

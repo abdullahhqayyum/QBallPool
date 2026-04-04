@@ -52,7 +52,7 @@ function stabilizePointer(previous, next) {
 // TABLE.width × TABLE.height), raw clientX is in screen pixels and must be
 // divided by the current CSS scale factor.
 // ---------------------------------------------------------------------------
-function clientToGame(scene, clientX, clientY) {
+export function clientToGame(scene, clientX, clientY) {
   const canvas = scene.game?.canvas
   if (!canvas) return { x: clientX, y: clientY }
   const rect = canvas.getBoundingClientRect()
