@@ -186,6 +186,7 @@ export default function GameCanvas({ gameState, onGameOver }) {
   const [opponentDisconnected, setOpponentDisconnected] = useState(false)
   const [waitingForOpponent,   setWaitingForOpponent]   = useState(false)
   const [hudHeight,            setHudHeight]            = useState(HUD_RESERVE)
+  const [showTutorial,         setShowTutorial]         = useState(true)
 
   const { w: windowWidth, h: windowHeight } = useWindowSize()
   const hudWidth = canvasWidth
@@ -462,6 +463,47 @@ export default function GameCanvas({ gameState, onGameOver }) {
         />
 
         <Confetti active={showConfetti} />
+
+        {showTutorial && (
+          <div
+            onClick={() => setShowTutorial(false)}
+            style={{
+              position:   'absolute', inset: 0,
+              background: 'rgba(0,0,0,0.65)',
+              display:    'flex', alignItems: 'center', justifyContent: 'center',
+              zIndex:     40, cursor: 'pointer',
+            }}
+          >
+            <div style={{
+              background:   '#1a1a1a',
+              border:       '1.5px solid #333',
+              borderRadius: 16,
+              padding:      '20px 28px',
+              textAlign:    'center',
+              color:        '#fff',
+              fontFamily:   'monospace',
+              maxWidth:     260,
+            }}>
+              <div style={{ fontSize: 26, marginBottom: 10 }}>🎱</div>
+              <div style={{ fontSize: 14, fontWeight: 'bold', color: '#c1ff72', marginBottom: 10 }}>
+                How to shoot
+              </div>
+              <div style={{ fontSize: 12, color: '#ccc', lineHeight: 1.8, marginBottom: 16 }}>
+                <div>👆 Tap anywhere to aim</div>
+                <div>📏 Stay back from the cue ball</div>
+                <div>⬇️ Drag away to set power</div>
+                <div>🔼 Release to shoot</div>
+              </div>
+              <div style={{
+                background: '#c1ff72', color: '#111',
+                borderRadius: 8, padding: '8px 20px',
+                fontSize: 12, fontWeight: 'bold',
+              }}>
+                Tap anywhere to start {'->'}
+              </div>
+            </div>
+          </div>
+        )}
 
         {waitingForOpponent && (
           <div style={{

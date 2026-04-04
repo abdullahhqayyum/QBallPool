@@ -804,16 +804,20 @@ function respawnCueBall(scene, onPlaced, kitchenOnly = false) {
     scene.registry.set('kitchenOnly', false)
   }
 
+  // TO:
   const downHandler = (ptr) => {
-    // Only start drag if clicking on or near the cue ball
-    if (Math.hypot(ptr.x - cueBall.x, ptr.y - cueBall.y) > BALL.radius * 3) return
+    if (Math.hypot(ptr.x - cueBall.x, ptr.y - cueBall.y) > BALL.radius * 3) {
+      // Clicked away from cue ball — confirm placement where it is and let cue.js handle the shot
+      cleanup()
+      scene.registry.set('placingCueBall', false)
+      cueBall._placing = false
+      scene._suppressShotUntil = Date.now() + 120
+      return
+    }
     dragging = true
     scene.registry.set('placingCueBall', true)
-
-    // Optional: indicate kitchen-only placement when break hasn't been taken
     scene.registry.set('kitchenOnly', (scene.registry.get('breakShotsRemaining') ?? 0) > 0)
   }
-
   const moveHandler = (ptr) => {
     if (!dragging) return
     const pos = clampToTable(ptr.x, ptr.y)
