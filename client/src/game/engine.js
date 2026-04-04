@@ -594,6 +594,8 @@ function handleTurnEnd(scene) {
   const scratched   = pocketedThisTurn.some(b => b.type === 'cue')
   const expectedType = currentlyMine ? currentMyType : currentOppType
 
+  console.log('[turnEnd] firstContactMade:', firstContactMade, 'scratched:', scratched, 'breakDone:', scene.registry.get('breakDone'), 'objectBalls:', objectBalls.length)
+
   // ── Break guard — skip ALL type assignment and foul logic for the opening shot ──
   const breakDone = scene.registry.get('breakDone')
   if (!breakDone) {
@@ -619,6 +621,7 @@ function handleTurnEnd(scene) {
     return
   }
 
+  // Foul: cue ball didn't contact anything at all
   if (!firstContactMade) {
     scene.registry.set('foul', true)
     switchTurn(scene)
@@ -626,7 +629,8 @@ function handleTurnEnd(scene) {
     return
   }
 
-  if (firstContactMade && !railHitAfterContact && objectBalls.length === 0) {
+  // Foul: no ball pocketed and no rail hit after contact
+  if (!railHitAfterContact && objectBalls.length === 0) {
     scene.registry.set('foul', true)
     switchTurn(scene)
     handleFoulBallInHand()
@@ -635,14 +639,8 @@ function handleTurnEnd(scene) {
 
   scene.registry.set('foul', false)
 
+  // Foul: hit wrong ball first (only applies once types are assigned)
   if (expectedType) {
-    if (!firstCueContactLabel) {
-      scene.registry.set('foul', true)
-      switchTurn(scene)
-      handleFoulBallInHand()
-      return
-    }
-
     const balls     = scene.registry.get('balls') || []
     const firstBall = balls.find(b => b.label === firstCueContactLabel)
     const firstType = firstBall?.type
@@ -833,36 +831,36 @@ export function respawnCueBall(scene, onPlaced, kitchenOnly = false) {
     scene.registry.set('kitchenOnly', false)
   }
 
-  const pointerToGame = (ptr) => {
-    const native = ptr?.event
+  const downHandler = (ptr) => {
+    const native = ptr.event
     const touch  = native?.changedTouches?.[0] ?? native?.touches?.[0]
     const client = touch ?? native
-    if (client?.clientX !== undefined) {
-      return clientToGame(scene, client.clientX, client.clientY)
-    }
-    return { x: ptr.x, y: ptr.y }
-  }
+    const gp     = (client?.clientX !== undefined)
+      ? clientToGame(scene, client.clientX, client.clientY)
+      : { x: ptr.x, y: ptr.y }
 
-  const downHandler = (ptr) => {
-    const gp = pointerToGame(ptr)
+    const distToBall = Math.hypot(gp.x - cueBall.x, gp.y - cueBall.y)
+
+    // Only hijack the touch if they tapped near the cue ball.
+    // Tapping far away = trying to aim -> let cue.js handle it.
+    if (distToBall > BALL.radius * 5) return
 
     dragging = true
+    cueBall._placing = true
     scene.registry.set('placingCueBall', true)
     scene.registry.set('kitchenOnly', (scene.registry.get('breakShotsRemaining') ?? 0) > 0)
-
-    const pos = clampToTable(gp.x, gp.y)
-    cueBall.x = pos.x
-    cueBall.y = pos.y
-    if (cueBall.gfx) {
-      cueBall.gfx.setPosition(pos.x, pos.y)
-      cueBall.gfx.setVisible(true)
-    }
-    updateTint(isValidCuePlacement(scene, cueBall, pos.x, pos.y))
   }
 
   const moveHandler = (ptr) => {
     if (!dragging) return
-    const gp = pointerToGame(ptr)
+
+    const native = ptr.event
+    const touch  = native?.changedTouches?.[0] ?? native?.touches?.[0]
+    const client = touch ?? native
+    const gp     = (client?.clientX !== undefined)
+      ? clientToGame(scene, client.clientX, client.clientY)
+      : { x: ptr.x, y: ptr.y }
+
     const pos = clampToTable(gp.x, gp.y)
     cueBall.x = pos.x
     cueBall.y = pos.y
@@ -874,31 +872,40 @@ export function respawnCueBall(scene, onPlaced, kitchenOnly = false) {
     if (!dragging) return
     dragging = false
 
-    const gp    = pointerToGame(ptr)
+    const native = ptr.event
+    const touch  = native?.changedTouches?.[0] ?? native?.touches?.[0]
+    const client = touch ?? native
+    const gp     = (client?.clientX !== undefined)
+      ? clientToGame(scene, client.clientX, client.clientY)
+      : { x: ptr.x, y: ptr.y }
+
     const pos   = clampToTable(gp.x, gp.y)
     const valid = isValidCuePlacement(scene, cueBall, pos.x, pos.y)
 
     if (valid) {
       cueBall.x = pos.x
       cueBall.y = pos.y
-      cueBall.vx = 0
-      cueBall.vy = 0
-      if (cueBall.gfx) { cueBall.gfx.setPosition(pos.x, pos.y); cueBall.gfx.setVisible(true) }
       lastValidPos = { x: pos.x, y: pos.y }
-      updateTint(true)
     } else {
-      // Snap back to last valid spot (or keep hidden if never placed)
+      // Snap back to last valid position
       cueBall.x = lastValidPos.x
       cueBall.y = lastValidPos.y
-      if (cueBall.gfx) { cueBall.gfx.setPosition(lastValidPos.x, lastValidPos.y); cueBall.gfx.setVisible(true) }
-      updateTint(true)
     }
 
-    scene.registry.set('placingCueBall', false)
+    cueBall.vx = 0
+    cueBall.vy = 0
+    if (cueBall.gfx) {
+      cueBall.gfx.setPosition(cueBall.x, cueBall.y)
+      cueBall.gfx.setVisible(true)
+      cueBall.gfx.setAlpha(1)
+    }
+
+    // Ball is placed — stop blocking the shoot flow.
+    // Player can now aim and shoot, OR tap the ball again to reposition.
     cueBall._placing = false
+    scene.registry.set('placingCueBall', false)
     scene.registry.set('kitchenOnly', false)
-    scene._suppressShotUntil = Date.now() + 120
-    cleanup()
+    scene._suppressShotUntil = Date.now() + 200
   }
 
   scene.input.on('pointerdown', downHandler)

@@ -204,19 +204,35 @@ export function drawTable(scene) {
 export function checkPockets(scene, onPocket) {
   const balls = scene.registry.get('balls') || []
 
+  const MIDDLE_POCKET_INDICES = [1, 4]
+
   balls.forEach((ball) => {
     if (ball.pocketed) return
 
-    POCKET.positions.forEach(([px, py]) => {
-      const dx = ball.x - px
-      const dy = ball.y - py
-      if (Math.hypot(dx, dy) < POCKET.radius * 0.85) {
-        onPocket(ball)
+    POCKET.positions.forEach(([px, py], i) => {
+      const dx   = ball.x - px
+      const dy   = ball.y - py
+      const dist = Math.hypot(dx, dy)
+
+      const isMiddle = MIDDLE_POCKET_INDICES.includes(i)
+
+      if (dist >= POCKET.radius * 0.85) return
+
+      if (isMiddle) {
+        const speed = Math.hypot(ball.vx, ball.vy)
+        if (speed > 0.3) {
+          // Only reject if ball is moving almost purely horizontally
+          // (parallel to the rail) — vy is tiny relative to vx
+          const absVy = Math.abs(ball.vy)
+          const absVx = Math.abs(ball.vx)
+          if (absVy < absVx * 0.25) return
+        }
       }
+
+      onPocket(ball)
     })
   })
 }
-
 export function drawPocketHighlights(graphics, pockets, selectedPocket) {
   graphics.clear()
 
