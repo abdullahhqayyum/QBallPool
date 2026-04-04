@@ -62,19 +62,36 @@ export function initEngine(containerId, gameState, onGameOver, onTurnEnd, onPock
   const applyScale = () => {
     const canvas = game.canvas
     if (!canvas) return
-    const padding = Math.min(16, window.innerWidth * 0.02)
-    const HUD_H   = 62
-    const maxByW  = window.innerWidth - padding * 2
-    const maxByH  = Math.floor((window.innerHeight - HUD_H - padding * 2) / (TABLE.height / TABLE.width))
-    const cssW    = Math.min(maxByW, maxByH)
-    const cssH    = Math.round(cssW * (TABLE.height / TABLE.width))
-    canvas.style.width       = cssW + 'px'
-    canvas.style.height      = cssH + 'px'
-    canvas.style.display     = 'block'
-    canvas.style.margin      = `${padding}px auto 0`
-    canvas.style.border      = 'none'
-    canvas.style.outline     = 'none'
-    canvas.style.touchAction = 'none'
+
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const isPortrait = vh > vw
+
+    if (isPortrait) {
+      // In portrait the wrapper div handles rotation + scale via CSS transform.
+      // Set the canvas to its natural game size so the transform math is correct.
+      canvas.style.width       = TABLE.width  + 'px'
+      canvas.style.height      = TABLE.height + 'px'
+      canvas.style.display     = 'block'
+      canvas.style.margin      = '0'
+      canvas.style.border      = 'none'
+      canvas.style.outline     = 'none'
+      canvas.style.touchAction = 'none'
+    } else {
+      const padding = Math.min(16, vw * 0.02)
+      const HUD_H   = 62
+      const maxByW  = vw - padding * 2
+      const maxByH  = Math.floor((vh - HUD_H - padding * 2) / (TABLE.height / TABLE.width))
+      const cssW    = Math.min(maxByW, maxByH)
+      const cssH    = Math.round(cssW * (TABLE.height / TABLE.width))
+      canvas.style.width       = cssW + 'px'
+      canvas.style.height      = cssH + 'px'
+      canvas.style.display     = 'block'
+      canvas.style.margin      = `${padding}px auto 0`
+      canvas.style.border      = 'none'
+      canvas.style.outline     = 'none'
+      canvas.style.touchAction = 'none'
+    }
   }
 
   // Canvas may not exist yet on the very first tick

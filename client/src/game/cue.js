@@ -55,11 +55,29 @@ function stabilizePointer(previous, next) {
 function clientToGame(scene, clientX, clientY) {
   const canvas = scene.game?.canvas
   if (!canvas) return { x: clientX, y: clientY }
-  const rect  = canvas.getBoundingClientRect()
-  const scale = rect.width / TABLE.width    // CSS width ÷ logical width
+  const rect = canvas.getBoundingClientRect()
+  const isPortrait = window.innerHeight > window.innerWidth
+
+  if (isPortrait) {
+    // After rotate(90deg) clockwise the canvas bounding rect is:
+    //   rect.width  = TABLE.height * s   (screen horizontal = table short axis)
+    //   rect.height = TABLE.width  * s   (screen vertical   = table long axis)
+    // Mapping back to game space:
+    //   game X = how far down the screen you are (from rect.top), scaled
+    //   game Y = how far from the RIGHT edge of the rect you are, scaled
+    const s      = rect.height / TABLE.width   // uniform scale factor
+    const localX = clientX - rect.left
+    const localY = clientY - rect.top
+    return {
+      x: localY           / s,
+      y: (rect.width - localX) / s,
+    }
+  }
+
+  const scale = rect.width / TABLE.width
   return {
-    x: (clientX - rect.left)  / scale,
-    y: (clientY - rect.top)   / scale,
+    x: (clientX - rect.left) / scale,
+    y: (clientY - rect.top)  / scale,
   }
 }
 
@@ -70,6 +88,23 @@ export function setupCue(scene, onShoot) {
   aimLine  = scene.add.graphics()
   powerBar = scene.add.graphics()
   pullLine = scene.add.graphics()
+
+  const toGame = (ptr) => {
+    // Phaser wraps the native event. On touch, the native event is at ptr.event.
+    // We need the *original* clientX/Y before Phaser processes it, because
+    // Phaser computes ptr.x/y from the unrotated canvas rect (wrong in portrait).
+    const native = ptr.event
+    if (native) {
+      // TouchEvent: use changedTouches
+      const touch = native.changedTouches?.[0] ?? native.touches?.[0]
+      if (touch) return clientToGame(scene, touch.clientX, touch.clientY)
+      // MouseEvent
+      if (native.clientX !== undefined) return clientToGame(scene, native.clientX, native.clientY)
+    }
+    // Last resort: use Phaser's coords (only correct in landscape)
+    return clientToGame(scene, ptr.x + (scene.game?.canvas?.getBoundingClientRect().left ?? 0),
+                              ptr.y + (scene.game?.canvas?.getBoundingClientRect().top  ?? 0))
+  }
 
   let dragStart   = null
   let dragCurrent = null
@@ -222,34 +257,37 @@ export function setupCue(scene, onShoot) {
 
     if (!canShoot(scene)) return
     // Phaser pointer coords are already in game-space — no conversion needed
+    const gp = toGame(ptr)
     if (dragStart) {
-      dragCurrent = { x: ptr.x, y: ptr.y }
-      renderDrag(ptr.x, ptr.y)
-      smoothPointer({ x: ptr.x, y: ptr.y })
+      dragCurrent = gp
+      renderDrag(gp.x, gp.y)
+      smoothPointer(gp)
     } else {
       const cueBall = getCueBall(scene)
       if (!cueBall) return
-      const angle = Math.atan2(cueBall.y - ptr.y, cueBall.x - ptr.x)
-      drawAimLine(scene, { x: ptr.x, y: ptr.y })
-      updateCursor(scene, { x: ptr.x, y: ptr.y }, angle)
+      const angle = Math.atan2(cueBall.y - gp.y, cueBall.x - gp.x)
+      drawAimLine(scene, gp)
+      updateCursor(scene, gp, angle)
     }
   })
 
   scene.input.on('pointerdown', (ptr) => {
     if (!canShoot(scene)) return
+    const gp = toGame(ptr)
     const cueBall = getCueBall(scene)
-    dragStart   = { x: ptr.x, y: ptr.y }
-    dragCurrent = { x: ptr.x, y: ptr.y }
+    dragStart   = gp
+    dragCurrent = gp
     // Lock the aim angle right now — it will not change as the player drags back
     lockedAngle = cueBall
-      ? Math.atan2(cueBall.y - ptr.y, cueBall.x - ptr.x)
+      ? Math.atan2(cueBall.y - gp.y, cueBall.x - gp.x)
       : null
     power = 0
     smoothedPtr = null; smoothedDeflect = null
   })
 
   scene.input.on('pointerup', (ptr) => {
-    releaseShot(ptr.x, ptr.y)
+    const gp = toGame(ptr)
+    releaseShot(gp.x, gp.y)
   })
 
   const cleanup = () => {

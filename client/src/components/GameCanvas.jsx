@@ -102,8 +102,9 @@ function useWindowSize() {
 }
 
 const TABLE_W = 800
-const TABLE_H = 450
+const TABLE_H = 400
 const HUD_RESERVE = 96
+const MOBILE_HUD_H = 58
 
 function getScale(windowWidth) {
   const maxW = Math.min(windowWidth - 8, TABLE_W)
@@ -455,7 +456,7 @@ export default function GameCanvas({ gameState, onGameOver }) {
   const ballSz = Math.max(12, Math.round(18 * scale))
   const ballGap = Math.max(3, Math.round(5 * scale))
 
-  const canvasMaxH = Math.max(180, windowHeight - hudHeight)
+  const canvasMaxH = isPortrait ? windowHeight : Math.max(180, windowHeight - hudHeight)
 
   return (
       <div style={{
@@ -464,12 +465,15 @@ export default function GameCanvas({ gameState, onGameOver }) {
         alignItems:         'center',
         background:         '#0a0a0a',
         minHeight:          '100vh',
+        height:             isPortrait ? '100vh' : 'auto',
         width:              '100vw',
+        overflow:           'hidden',
         overflowX:          'hidden',
         overflowY:          isPortrait ? 'hidden' : 'hidden',
         overscrollBehavior: 'contain',
-        // In portrait, we need room for the rotated canvas
         justifyContent:     isPortrait ? 'center' : 'flex-start',
+        position:           isPortrait ? 'fixed' : 'relative',
+        inset:              isPortrait ? 0 : 'auto',
       }}>
       <style>{`
         @keyframes cheatPulse {
@@ -483,15 +487,23 @@ export default function GameCanvas({ gameState, onGameOver }) {
           lineHeight:  0,
           touchAction: 'none',
           overflow:    'visible',
-          // Portrait: rotate 90° and swap dimensions so it fills the screen
-          ...(isPortrait ? {
-            transform:       'rotate(90deg)',
-            transformOrigin: 'center center',
-            width:           `${windowHeight}px`,
-            height:          `${windowWidth}px`,
-            marginTop:       `${(windowHeight - windowWidth) / 2}px`,
-            marginBottom:    `${(windowHeight - windowWidth) / 2}px`,
-          } : {
+          ...(isPortrait ? (() => {
+            const padding  = 8
+            const scaleByW = (windowWidth - padding * 2) / TABLE_H
+            const scaleByH = (windowHeight - MOBILE_HUD_H - padding * 2) / TABLE_W
+            const s        = Math.min(scaleByW, scaleByH)
+            return {
+              position:        'fixed',
+              top:             `${(windowHeight - MOBILE_HUD_H) / 2}px`,
+              left:            '50%',
+              transform:       `translate(-50%, -50%) rotate(90deg) scale(${s})`,
+              transformOrigin: 'center center',
+              width:           `${TABLE_W}px`,
+              height:          `${TABLE_H}px`,
+              zIndex:          1,
+            }
+          })() : {
+            position:  'relative',
             width:     '100%',
             maxHeight: canvasMaxH,
           }),
@@ -600,69 +612,52 @@ export default function GameCanvas({ gameState, onGameOver }) {
       )}
 
       {/* HUD */}
-      {!isPortrait && (
-      <div
-        ref={hudRef}
-        style={{
-        width:          hudWidth,
-        marginTop:      6,
-        background:     '#111',
-        borderRadius:   8,
-        padding:        `8px ${Math.round(12 * scale)}px`,
-        display:        'flex',
-        justifyContent: 'space-between',
-        alignItems:     'center',
-        fontFamily:     'monospace',
-        boxSizing:      'border-box',
-        gap:            4,
-      }}>
-        {/* P1 solids */}
-        <div style={{ display: 'flex', gap: ballGap, alignItems: 'center', flexShrink: 0 }}>
-          <span style={{ fontSize: 10, color: '#555', marginRight: 2 }}>
-            {!myType ? 'P1' : myType === 'solid' ? 'P1' : 'P2'}
-          </span>
-          {[1,2,3,4,5,6,7].map(n => {
-            const isAssigned = myType !== null
-            const isPocketed = pocketed.includes(`solid-${n}`)
-            return (
-              <div key={n} style={{
-                width: ballSz, height: ballSz, borderRadius: '50%',
-                background: isAssigned ? getBallColor(n) : '#222',
-                opacity:    isPocketed ? 0.2 : 1,
-                border:     isAssigned ? 'none' : '1px solid #333',
-                flexShrink: 0,
-                transition: 'background 0.3s',
-              }} />
-            )
-          })}
-        </div>
-
-        {/* Turn indicator + cheat */}
-        <div style={{ textAlign: 'center', flexShrink: 0 }}>
-          {foul && <div style={{ color: '#ff4444', fontSize: 9, marginBottom: 2 }}>FOUL</div>}
-          {placingCueBall && (
-            <div style={{ color: '#ffaa00', fontSize: 9, marginBottom: 2 }}>BALL IN HAND</div>
-          )}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+      {isPortrait ? (
+        /* -- Mobile mini-HUD (portrait) -- */
+        <div style={{
+          position:   'fixed',
+          bottom:     0,
+          left:       0,
+          right:      0,
+          zIndex:     10,
+          background: '#111',
+          padding:    '6px 12px',
+          display:    'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          fontFamily: 'monospace',
+          boxSizing:  'border-box',
+          gap:        8,
+        }}>
+          {/* Turn indicator */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+            {foul && <div style={{ color: '#ff4444', fontSize: 8 }}>FOUL</div>}
+            {placingCueBall && <div style={{ color: '#ffaa00', fontSize: 8 }}>BALL IN HAND</div>}
             <div style={{
-              fontSize:   Math.max(10, Math.round(13 * scale)),
-              fontWeight: 'bold',
-              padding:    `4px ${Math.round(12 * scale)}px`,
+              fontSize:     11,
+              fontWeight:   'bold',
+              padding:      '4px 10px',
               borderRadius: 6,
-              minWidth:   Math.round(80 * scale),
-              textAlign:  'center',
-              background: myTurn ? '#1a6b2a' : '#6b1a1a',
-              color:      '#fff',
-              whiteSpace: 'nowrap',
+              background:   myTurn ? '#1a6b2a' : '#6b1a1a',
+              color:        '#fff',
+              whiteSpace:   'nowrap',
             }}>
-          {gameState?.mode === 'ai'
-            ? (myTurn ? 'YOUR TURN' : 'CPU...')
-            : gameState?.mode === 'online'
-              ? (myTurn ? 'YOUR TURN' : 'THEIR TURN')
-              : (myTurn ? 'P1 TURN' : 'P2 TURN')}
+              {gameState?.mode === 'ai'
+                ? (myTurn ? 'YOUR TURN' : 'CPU...')
+                : gameState?.mode === 'online'
+                  ? (myTurn ? 'YOUR TURN' : 'THEIR TURN')
+                  : (myTurn ? 'P1 TURN' : 'P2 TURN')}
             </div>
+            {calledPocket !== null && (
+              <div style={{ fontSize: 8, color: '#ffdd44' }}>
+                8-ball → {['TL','TM','TR','BL','BM','BR'][calledPocket]}
+              </div>
+            )}
+          </div>
 
-            {/* Cheat button */}
+          {/* Spin + Cheat */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <SpinPicker size={40} spin={spin} onChange={handleSpinChange} />
             <button
               title={cheatUsed ? 'Cheat already used' : cheatAvailable ? 'Undo this shot!' : 'Available while ball is rolling'}
               onClick={handleCheat}
@@ -671,11 +666,9 @@ export default function GameCanvas({ gameState, onGameOver }) {
                 background:   cheatUsed      ? '#111'
                             : cheatAvailable ? '#7a1f00'
                             : '#1c1c1c',
-                border:       cheatAvailable && !cheatUsed
-                                ? '1px solid #ff5500'
-                                : '1px solid #333',
+                border:       cheatAvailable && !cheatUsed ? '1px solid #ff5500' : '1px solid #333',
                 borderRadius: 6,
-                padding:      '1px 6px',
+                padding:      '4px 8px',
                 color:        cheatUsed      ? '#333'
                             : cheatAvailable ? '#fff'
                             : '#3a3a3a',
@@ -684,55 +677,148 @@ export default function GameCanvas({ gameState, onGameOver }) {
                 fontWeight:   'bold',
                 display:      'flex',
                 alignItems:   'center',
-                gap:          2,
+                gap:          3,
                 boxShadow:    cheatAvailable && !cheatUsed ? '0 0 10px #ff550066' : 'none',
                 transition:   'all 0.2s',
                 animation:    cheatAvailable && !cheatUsed ? 'cheatPulse 1s ease-in-out infinite' : 'none',
               }}
             >
-              <span style={{ fontSize: 11, lineHeight: 1 }}>{cheatUsed ? '🚫' : '⏪'}</span>
+              <span style={{ fontSize: 13, lineHeight: 1 }}>{cheatUsed ? '🚫' : '⏪'}</span>
               <span style={{ fontSize: 8, letterSpacing: 0.5, lineHeight: 1 }}>{cheatUsed ? 'USED' : 'CHEAT'}</span>
             </button>
-
-            <div style={{ display: 'flex', alignItems: 'center', height: 36 }}>
-              <SpinPicker size={36} spin={spin} onChange={handleSpinChange} />
-            </div>
           </div>
-          {!myType && (
-            <div style={{ fontSize: 8, color: '#444', marginTop: 2 }}>pot a ball to assign</div>
-          )}
-          {calledPocket !== null && (
-            <div style={{ fontSize: 8, color: '#ffdd44', marginTop: 2 }}>
-              8-ball → {['TL','TM','TR','BL','BM','BR'][calledPocket]}
-            </div>
-          )}
         </div>
+      ) : (
+        /* -- Desktop full HUD (landscape) -- */
+        <div
+          ref={hudRef}
+          style={{
+            width:          hudWidth,
+            marginTop:      6,
+            background:     '#111',
+            borderRadius:   8,
+            padding:        `8px ${Math.round(12 * scale)}px`,
+            display:        'flex',
+            justifyContent: 'space-between',
+            alignItems:     'center',
+            fontFamily:     'monospace',
+            boxSizing:      'border-box',
+            gap:            4,
+          }}>
+          {/* P1 solids */}
+          <div style={{ display: 'flex', gap: ballGap, alignItems: 'center', flexShrink: 0 }}>
+            <span style={{ fontSize: 10, color: '#555', marginRight: 2 }}>
+              {!myType ? 'P1' : myType === 'solid' ? 'P1' : 'P2'}
+            </span>
+            {[1,2,3,4,5,6,7].map(n => {
+              const isAssigned = myType !== null
+              const isPocketed = pocketed.includes(`solid-${n}`)
+              return (
+                <div key={n} style={{
+                  width: ballSz, height: ballSz, borderRadius: '50%',
+                  background: isAssigned ? getBallColor(n) : '#222',
+                  opacity:    isPocketed ? 0.2 : 1,
+                  border:     isAssigned ? 'none' : '1px solid #333',
+                  flexShrink: 0,
+                  transition: 'background 0.3s',
+                }} />
+              )
+            })}
+          </div>
 
-        {/* P2 stripes */}
-        <div style={{ display: 'flex', gap: ballGap, alignItems: 'center', flexShrink: 0 }}>
-          {[9,10,11,12,13,14,15].map(n => {
-            const isAssigned = myType !== null
-            const isPocketed = pocketed.includes(`stripe-${n}`)
-            const borderPx   = Math.max(2, Math.round(3 * scale))
-            return (
-              <div key={n} style={{
-                width:      ballSz, height: ballSz, borderRadius: '50%',
-                background: isAssigned ? '#fff' : '#222',
-                opacity:    isPocketed ? 0.2 : 1,
-                border:     isAssigned
-                  ? `${borderPx}px solid ${getBallColor(n)}`
-                  : '1px solid #333',
-                boxSizing:  'border-box',
-                flexShrink: 0,
-                transition: 'border 0.3s, background 0.3s',
-              }} />
-            )
-          })}
-          <span style={{ fontSize: 10, color: '#555', marginLeft: 2 }}>
-            {!myType ? 'P2' : myType === 'stripe' ? 'P1' : 'P2'}
-          </span>
+          {/* Turn indicator + cheat */}
+          <div style={{ textAlign: 'center', flexShrink: 0 }}>
+            {foul && <div style={{ color: '#ff4444', fontSize: 9, marginBottom: 2 }}>FOUL</div>}
+            {placingCueBall && (
+              <div style={{ color: '#ffaa00', fontSize: 9, marginBottom: 2 }}>BALL IN HAND</div>
+            )}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <div style={{
+                fontSize:   Math.max(10, Math.round(13 * scale)),
+                fontWeight: 'bold',
+                padding:    `4px ${Math.round(12 * scale)}px`,
+                borderRadius: 6,
+                minWidth:   Math.round(80 * scale),
+                textAlign:  'center',
+                background: myTurn ? '#1a6b2a' : '#6b1a1a',
+                color:      '#fff',
+                whiteSpace: 'nowrap',
+              }}>
+                {gameState?.mode === 'ai'
+                  ? (myTurn ? 'YOUR TURN' : 'CPU...')
+                  : gameState?.mode === 'online'
+                    ? (myTurn ? 'YOUR TURN' : 'THEIR TURN')
+                    : (myTurn ? 'P1 TURN' : 'P2 TURN')}
+              </div>
+              <button
+                title={cheatUsed ? 'Cheat already used' : cheatAvailable ? 'Undo this shot!' : 'Available while ball is rolling'}
+                onClick={handleCheat}
+                style={{
+                  cursor:       cheatAvailable && !cheatUsed ? 'pointer' : 'default',
+                  background:   cheatUsed      ? '#111'
+                              : cheatAvailable ? '#7a1f00'
+                              : '#1c1c1c',
+                  border:       cheatAvailable && !cheatUsed
+                                  ? '1px solid #ff5500'
+                                  : '1px solid #333',
+                  borderRadius: 6,
+                  padding:      '1px 6px',
+                  color:        cheatUsed      ? '#333'
+                              : cheatAvailable ? '#fff'
+                              : '#3a3a3a',
+                  fontSize:     11,
+                  fontFamily:   'monospace',
+                  fontWeight:   'bold',
+                  display:      'flex',
+                  alignItems:   'center',
+                  gap:          2,
+                  boxShadow:    cheatAvailable && !cheatUsed ? '0 0 10px #ff550066' : 'none',
+                  transition:   'all 0.2s',
+                  animation:    cheatAvailable && !cheatUsed ? 'cheatPulse 1s ease-in-out infinite' : 'none',
+                }}
+              >
+                <span style={{ fontSize: 11, lineHeight: 1 }}>{cheatUsed ? '🚫' : '⏪'}</span>
+                <span style={{ fontSize: 8, letterSpacing: 0.5, lineHeight: 1 }}>{cheatUsed ? 'USED' : 'CHEAT'}</span>
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', height: 36 }}>
+                <SpinPicker size={36} spin={spin} onChange={handleSpinChange} />
+              </div>
+            </div>
+            {!myType && (
+              <div style={{ fontSize: 8, color: '#444', marginTop: 2 }}>pot a ball to assign</div>
+            )}
+            {calledPocket !== null && (
+              <div style={{ fontSize: 8, color: '#ffdd44', marginTop: 2 }}>
+                8-ball → {['TL','TM','TR','BL','BM','BR'][calledPocket]}
+              </div>
+            )}
+          </div>
+
+          {/* P2 stripes */}
+          <div style={{ display: 'flex', gap: ballGap, alignItems: 'center', flexShrink: 0 }}>
+            {[9,10,11,12,13,14,15].map(n => {
+              const isAssigned = myType !== null
+              const isPocketed = pocketed.includes(`stripe-${n}`)
+              const borderPx   = Math.max(2, Math.round(3 * scale))
+              return (
+                <div key={n} style={{
+                  width:      ballSz, height: ballSz, borderRadius: '50%',
+                  background: isAssigned ? '#fff' : '#222',
+                  opacity:    isPocketed ? 0.2 : 1,
+                  border:     isAssigned
+                    ? `${borderPx}px solid ${getBallColor(n)}`
+                    : '1px solid #333',
+                  boxSizing:  'border-box',
+                  flexShrink: 0,
+                  transition: 'border 0.3s, background 0.3s',
+                }} />
+              )
+            })}
+            <span style={{ fontSize: 10, color: '#555', marginLeft: 2 }}>
+              {!myType ? 'P2' : myType === 'stripe' ? 'P1' : 'P2'}
+            </span>
+          </div>
         </div>
-      </div>
       )}
 
       {needsPocketCall && (
