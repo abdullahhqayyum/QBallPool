@@ -188,6 +188,13 @@ export default function GameCanvas({ gameState, onGameOver }) {
   const [hudHeight,            setHudHeight]            = useState(HUD_RESERVE)
   const [showTutorial,         setShowTutorial]         = useState(true)
 
+  useEffect(() => {
+    if (showTutorial && gameState?.mode === 'online') {
+      // In online mode, dismiss tutorial as soon as we know whose turn it is.
+      setShowTutorial(false)
+    }
+  }, [waitingForOpponent])
+
   const { w: windowWidth, h: windowHeight } = useWindowSize()
   const hudWidth = canvasWidth
   const scale    = canvasWidth / TABLE_W
@@ -483,6 +490,7 @@ export default function GameCanvas({ gameState, onGameOver }) {
               color:        '#fff',
               fontFamily:   'monospace',
               maxWidth:     260,
+              pointerEvents:'none',
             }}>
               <div style={{ fontSize: 26, marginBottom: 10 }}>🎱</div>
               <div style={{ fontSize: 14, fontWeight: 'bold', color: '#c1ff72', marginBottom: 10 }}>
@@ -606,9 +614,11 @@ export default function GameCanvas({ gameState, onGameOver }) {
               color:      '#fff',
               whiteSpace: 'nowrap',
             }}>
-              {gameState?.mode === 'ai'
-                ? (myTurn ? 'YOUR TURN' : 'CPU...')
-                : (myTurn ? 'P1 TURN' : 'P2 TURN')}
+          {gameState?.mode === 'ai'
+            ? (myTurn ? 'YOUR TURN' : 'CPU...')
+            : gameState?.mode === 'online'
+              ? (myTurn ? 'YOUR TURN' : 'THEIR TURN')
+              : (myTurn ? 'P1 TURN' : 'P2 TURN')}
             </div>
 
             {/* Cheat button */}
