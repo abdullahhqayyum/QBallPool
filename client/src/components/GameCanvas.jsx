@@ -97,7 +97,8 @@ function useWindowSize() {
       window.removeEventListener('orientationchange', handler)
     }
   }, [])
-  return size
+  const isPortrait = size.h > size.w
+  return { ...size, isPortrait }
 }
 
 const TABLE_W = 800
@@ -195,7 +196,7 @@ export default function GameCanvas({ gameState, onGameOver }) {
     }
   }, [waitingForOpponent])
 
-  const { w: windowWidth, h: windowHeight } = useWindowSize()
+  const { w: windowWidth, h: windowHeight, isPortrait } = useWindowSize()
   const hudWidth = canvasWidth
   const scale    = canvasWidth / TABLE_W
 
@@ -457,18 +458,19 @@ export default function GameCanvas({ gameState, onGameOver }) {
   const canvasMaxH = Math.max(180, windowHeight - hudHeight)
 
   return (
-    <div style={{
-      display:            'flex',
-      flexDirection:      'column',
-      alignItems:         'center',
-      background:         '#0a0a0a',
-      minHeight:          '100vh',
-      paddingTop:         'env(safe-area-inset-top, 0px)',
-      paddingBottom:      'env(safe-area-inset-bottom, 8px)',
-      overflowX:          'hidden',
-      overflowY:          'hidden',
-      overscrollBehavior: 'contain',
-    }}>
+      <div style={{
+        display:            'flex',
+        flexDirection:      'column',
+        alignItems:         'center',
+        background:         '#0a0a0a',
+        minHeight:          '100vh',
+        width:              '100vw',
+        overflowX:          'hidden',
+        overflowY:          isPortrait ? 'hidden' : 'hidden',
+        overscrollBehavior: 'contain',
+        // In portrait, we need room for the rotated canvas
+        justifyContent:     isPortrait ? 'center' : 'flex-start',
+      }}>
       <style>{`
         @keyframes cheatPulse {
           0%, 100% { box-shadow: 0 0 6px #ff550055; }
@@ -476,8 +478,25 @@ export default function GameCanvas({ gameState, onGameOver }) {
         }
       `}</style>
       {/* Canvas wrapper — no extra borders; all visuals are inside Phaser */}
-      <div style={{ position: 'relative', lineHeight: 0, touchAction: 'none', maxHeight: canvasMaxH, width: '100%', overflow: 'hidden' }}>
-        <div
+        <div style={{
+          position:   'relative',
+          lineHeight:  0,
+          touchAction: 'none',
+          overflow:    'visible',
+          // Portrait: rotate 90° and swap dimensions so it fills the screen
+          ...(isPortrait ? {
+            transform:       'rotate(90deg)',
+            transformOrigin: 'center center',
+            width:           `${windowHeight}px`,
+            height:          `${windowWidth}px`,
+            marginTop:       `${(windowHeight - windowWidth) / 2}px`,
+            marginBottom:    `${(windowHeight - windowWidth) / 2}px`,
+          } : {
+            width:     '100%',
+            maxHeight: canvasMaxH,
+          }),
+        }}>
+          <div
           id="game-container"
           ref={containerRef}
           style={{
@@ -581,6 +600,7 @@ export default function GameCanvas({ gameState, onGameOver }) {
       )}
 
       {/* HUD */}
+      {!isPortrait && (
       <div
         ref={hudRef}
         style={{
@@ -713,6 +733,7 @@ export default function GameCanvas({ gameState, onGameOver }) {
           </span>
         </div>
       </div>
+      )}
 
       {needsPocketCall && (
         <PocketCallModal
