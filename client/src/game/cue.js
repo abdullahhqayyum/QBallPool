@@ -13,7 +13,7 @@ const DEFLECT_SMOOTH_ALPHA = 0.25
 // How much the aim angle drifts per frame while dragging back (0 = frozen, 1 = full tracking)
 const AIM_DRAG_SENSITIVITY = 0.03
 // If the pointer comes within this many px of the cue ball during drag, cancel the shot
-const CANCEL_RADIUS = 20
+const CANCEL_RADIUS = 14
 let   smoothedPtr          = null
 let   smoothedDeflect      = null
 // Spin state: -1..+1
@@ -290,6 +290,59 @@ export function setupCue(scene, onShoot) {
     releaseShot(gp.x, gp.y)
   })
 
+// Window-level mousedown + touchstart to start an aiming drag when the
+// pointer originates outside the canvas (or leaves it). This lets players
+// begin aiming by clicking/tapping the page near the table.
+const handleWindowMouseDown = (evt) => {
+  // Only hijack if no drag is in progress and we can shoot
+  if (dragStart) return
+  if (!canShoot(scene)) return
+  const cueBall = getCueBall(scene)
+  if (!cueBall) return
+  const gp = clientToGame(scene, evt.clientX, evt.clientY)
+  // Must be aiming at the table region — ignore clicks far outside
+  const buffer = TABLE.cueAimBuffer ?? 80
+  if (
+    gp.x < TABLE.playX1 - buffer || gp.x > TABLE.playX2 + buffer ||
+    gp.y < TABLE.playY1 - buffer || gp.y > TABLE.playY2 + buffer
+  ) return
+  // Must not be clicking ON the cue ball (that's placement drag)
+  if (Math.hypot(gp.x - cueBall.x, gp.y - cueBall.y) < BALL.radius * 4) return
+
+  dragStart   = gp
+  dragCurrent = gp
+  lockedAngle = Math.atan2(cueBall.y - gp.y, cueBall.x - gp.x)
+  power       = 0
+  smoothedPtr = null
+  smoothedDeflect = null
+}
+
+const handleWindowTouchStart = (evt) => {
+  if (dragStart) return
+  if (!canShoot(scene)) return
+  const cueBall = getCueBall(scene)
+  if (!cueBall) return
+  const t  = evt.changedTouches[0]
+  const gp = clientToGame(scene, t.clientX, t.clientY)
+  const buffer = TABLE.cueAimBuffer ?? 80
+  if (
+    gp.x < TABLE.playX1 - buffer || gp.x > TABLE.playX2 + buffer ||
+    gp.y < TABLE.playY1 - buffer || gp.y > TABLE.playY2 + buffer
+  ) return
+  if (Math.hypot(gp.x - cueBall.x, gp.y - cueBall.y) < BALL.radius * 4) return
+
+  dragStart   = gp
+  dragCurrent = gp
+  lockedAngle = Math.atan2(cueBall.y - gp.y, cueBall.x - gp.x)
+  power       = 0
+  smoothedPtr = null
+  smoothedDeflect = null
+}
+
+window.addEventListener('mousedown',  handleWindowMouseDown)
+window.addEventListener('touchstart', handleWindowTouchStart, { passive: true })
+
+// AFTER
   const cleanup = () => {
     window.removeEventListener('mousemove',    handleWindowMouseMove)
     window.removeEventListener('mouseup',      handleWindowMouseUp)
@@ -297,6 +350,8 @@ export function setupCue(scene, onShoot) {
     window.removeEventListener('touchend',     handleWindowTouchEnd)
     window.removeEventListener('contextmenu',  handleContextMenu)
     window.removeEventListener('keydown',      handleKeyDown)
+    window.removeEventListener('mousedown',    handleWindowMouseDown)
+    window.removeEventListener('touchstart',   handleWindowTouchStart)
   }
   scene.events.once('shutdown', cleanup)
   scene.events.once('destroy',  cleanup)
@@ -352,7 +407,7 @@ function drawAimLine(scene, ptr) {
   aimLine.lineStyle(1.5, 0xd4a96a, 0.6)
   aimLine.beginPath()
   aimLine.moveTo(cx - Math.cos(angle) * BALL.radius, cy - Math.sin(angle) * BALL.radius)
-  aimLine.lineTo(cx - Math.cos(angle) * (BALL.radius + 80), cy - Math.sin(angle) * (BALL.radius + 80))
+  aimLine.lineTo(cx - Math.cos(angle) * (BALL.radius + CUE.aimLineLength), cy - Math.sin(angle) * (BALL.radius + CUE.aimLineLength))
   aimLine.strokePath()
 
   const hit = getFirstHitBall(scene, cx, cy, angle)
@@ -558,9 +613,9 @@ function drawPowerBar(scene, power) {
   const pct   = power / CUE.maxPower
   const color = pct < 0.5 ? 0x44ff44 : pct < 0.8 ? 0xffaa00 : 0xff3300
   powerBar.clear()
-  powerBar.fillStyle(0x222222, 0.9)
+  powerBar.fillStyle(0x000000, 0.35)          // more transparent background track
   powerBar.fillRoundedRect(18, 355, 154, 16, 4)
-  powerBar.fillStyle(color, 1)
+  powerBar.fillStyle(color, 0.6)              // semi-transparent fill
   powerBar.fillRoundedRect(20, 357, 150 * pct, 12, 3)
 }
 
@@ -690,7 +745,7 @@ function drawAimLineByAngle(scene, angle) {
   aimLine.lineStyle(1.5, 0xd4a96a, 0.6)
   aimLine.beginPath()
   aimLine.moveTo(cx - Math.cos(angle) * BALL.radius, cy - Math.sin(angle) * BALL.radius)
-  aimLine.lineTo(cx - Math.cos(angle) * (BALL.radius + 80), cy - Math.sin(angle) * (BALL.radius + 80))
+  aimLine.lineTo(cx - Math.cos(angle) * (BALL.radius + CUE.aimLineLength), cy - Math.sin(angle) * (BALL.radius + CUE.aimLineLength))
   aimLine.strokePath()
 
   const hit = getFirstHitBall(scene, cx, cy, angle)

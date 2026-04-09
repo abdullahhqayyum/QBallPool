@@ -188,8 +188,10 @@ export default function GameCanvas({ gameState, onGameOver }) {
   const [opponentDisconnected, setOpponentDisconnected] = useState(false)
   const [waitingForOpponent,   setWaitingForOpponent]   = useState(false)
   const [hudHeight,            setHudHeight]            = useState(HUD_RESERVE)
-  const [showTutorial,         setShowTutorial]         = useState(true)
-
+  const [showTutorial,    setShowTutorial]    = useState(true)
+  const [showCheatTip,    setShowCheatTip]    = useState(true)
+  const [showSpinTip,     setShowSpinTip]     = useState(true)
+  const [pocketCallVisible, setPocketCallVisible] = useState(false)
   useEffect(() => {
     if (showTutorial && gameState?.mode === 'online') {
       // In online mode, dismiss tutorial as soon as we know whose turn it is.
@@ -230,7 +232,16 @@ export default function GameCanvas({ gameState, onGameOver }) {
     gameRef.current = initEngine(
       'game-container',
       gameState,
-      (outcome) => setResult(outcome),
+      (outcome) => {
+        // In offline 2P, `outcome` is always from Player 1's perspective.
+        // Translate to an absolute winner so the shared screen shows who won.
+        if (gameState?.mode === 'offline') {
+          setResult({ winner: outcome === 'win' ? 'P1' : 'P2' })
+        } else {
+          // online/ai: keep the original local-perspective string
+          setResult(outcome)
+        }
+      },
       ({ switched, foul: wasFoul, assignedType, myTurn: nextMyTurn, myType: engineMyType }) => {
         const scene = gameRef.current?.scene?.scenes?.[0]
         if (!scene) return
@@ -377,7 +388,8 @@ export default function GameCanvas({ gameState, onGameOver }) {
       const type = scene.registry.get('myType')
       if (type) setMyType(type)
       setPlacingCueBall(!!scene.registry.get('placingCueBall'))
-      setCheatAvailable(!!scene.registry.get('cheatAvailable') && !scene.registry.get('cheatUsed'))
+      const isMyActiveMode = gameState?.mode === 'offline' || !!scene.registry.get('myTurn')
+      setCheatAvailable(!!scene.registry.get('cheatAvailable') && !scene.registry.get('cheatUsed') && isMyActiveMode)
       setCheatUsed(!!scene.registry.get('cheatUsed'))
       if (scene.registry.get('opponentDisconnected')) setOpponentDisconnected(true)
 
@@ -400,8 +412,12 @@ export default function GameCanvas({ gameState, onGameOver }) {
 
       if (allDone && eightLeft && !alreadyCalled) {
         setNeedsPocketCall(true)
+        setPocketCallVisible(true)
+        // Banner auto-hides after 4s — pocket targets stay active
+        setTimeout(() => setPocketCallVisible(false), 4000)
       } else if (alreadyCalled || !eightLeft) {
         setNeedsPocketCall(false)
+        setPocketCallVisible(false)
       }
     }, 300)
 
@@ -631,7 +647,17 @@ export default function GameCanvas({ gameState, onGameOver }) {
         }}>
           {/* Turn indicator */}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
-            {foul && <div style={{ color: '#ff4444', fontSize: 8 }}>FOUL</div>}
+            {foul && (
+              <div style={{
+                color:        '#fff',
+                background:   '#cc0000',
+                fontSize:     9,
+                fontWeight:   'bold',
+                padding:      '1px 6px',
+                borderRadius: 3,
+                letterSpacing: 1,
+              }}>⚠ FOUL</div>
+            )}            
             {placingCueBall && <div style={{ color: '#ffaa00', fontSize: 8 }}>BALL IN HAND</div>}
             <div style={{
               fontSize:     11,
@@ -657,35 +683,114 @@ export default function GameCanvas({ gameState, onGameOver }) {
 
           {/* Spin + Cheat */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <SpinPicker size={40} spin={spin} onChange={handleSpinChange} />
-            <button
-              title={cheatUsed ? 'Cheat already used' : cheatAvailable ? 'Undo this shot!' : 'Available while ball is rolling'}
-              onClick={handleCheat}
-              style={{
-                cursor:       cheatAvailable && !cheatUsed ? 'pointer' : 'default',
-                background:   cheatUsed      ? '#111'
-                            : cheatAvailable ? '#7a1f00'
-                            : '#1c1c1c',
-                border:       cheatAvailable && !cheatUsed ? '1px solid #ff5500' : '1px solid #333',
-                borderRadius: 6,
-                padding:      '4px 8px',
-                color:        cheatUsed      ? '#333'
-                            : cheatAvailable ? '#fff'
-                            : '#3a3a3a',
-                fontSize:     11,
-                fontFamily:   'monospace',
-                fontWeight:   'bold',
-                display:      'flex',
-                alignItems:   'center',
-                gap:          3,
-                boxShadow:    cheatAvailable && !cheatUsed ? '0 0 10px #ff550066' : 'none',
-                transition:   'all 0.2s',
-                animation:    cheatAvailable && !cheatUsed ? 'cheatPulse 1s ease-in-out infinite' : 'none',
-              }}
-            >
-              <span style={{ fontSize: 13, lineHeight: 1 }}>{cheatUsed ? '🚫' : '⏪'}</span>
-              <span style={{ fontSize: 8, letterSpacing: 0.5, lineHeight: 1 }}>{cheatUsed ? 'USED' : 'CHEAT'}</span>
-            </button>
+
+            {/* Spin picker + tooltip */}
+            <div style={{ position: 'relative' }}>
+              {showSpinTip && (
+                <div style={{
+                  position:     'absolute',
+                  bottom:       '110%',
+                  right:        0,
+                  background:   '#1e1e1e',
+                  border:       '1px solid #444',
+                  borderRadius: 6,
+                  padding:      '6px 10px',
+                  width:        140,
+                  fontSize:     10,
+                  color:        '#ccc',
+                  fontFamily:   'monospace',
+                  lineHeight:   1.5,
+                  zIndex:       50,
+                  whiteSpace:   'normal',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                    <span style={{ color: '#ffdd44', fontWeight: 'bold' }}>◎ SPIN</span>
+                    <span
+                      onClick={() => setShowSpinTip(false)}
+                      style={{ cursor: 'pointer', color: '#666', fontSize: 11 }}
+                    >✕</span>
+                  </div>
+                  Drag the dot to add spin. Top/bottom = topspin/backspin. Left/right = sidespin.
+                  <div style={{
+                    position:   'absolute',
+                    bottom:     -6,
+                    right:      18,
+                    width:      0, height: 0,
+                    borderLeft:  '5px solid transparent',
+                    borderRight: '5px solid transparent',
+                    borderTop:   '6px solid #444',
+                  }} />
+                </div>
+              )}
+              <SpinPicker size={40} spin={spin} onChange={handleSpinChange} />
+            </div>
+
+            {/* Cheat button + tooltip */}
+            <div style={{ position: 'relative' }}>
+              {showCheatTip && !cheatUsed && (
+                <div style={{
+                  position:     'absolute',
+                  bottom:       '110%',
+                  right:        0,
+                  background:   '#1e1e1e',
+                  border:       '1px solid #444',
+                  borderRadius: 6,
+                  padding:      '6px 10px',
+                  width:        140,
+                  fontSize:     10,
+                  color:        '#ccc',
+                  fontFamily:   'monospace',
+                  lineHeight:   1.5,
+                  zIndex:       50,
+                  whiteSpace:   'normal',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                    <span style={{ color: '#ff8844', fontWeight: 'bold' }}>⏪ CHEAT</span>
+                    <span
+                      onClick={() => setShowCheatTip(false)}
+                      style={{ cursor: 'pointer', color: '#666', fontSize: 11 }}
+                    >✕</span>
+                  </div>
+                  While balls are rolling, press this to rewind the shot. One use per game.
+                  <div style={{
+                    position:   'absolute',
+                    bottom:     -6,
+                    right:      18,
+                    width:      0, height: 0,
+                    borderLeft:  '5px solid transparent',
+                    borderRight: '5px solid transparent',
+                    borderTop:   '6px solid #444',
+                  }} />
+                </div>
+              )}
+              <button
+                onClick={handleCheat}
+                style={{
+                  cursor:       cheatAvailable && !cheatUsed ? 'pointer' : 'default',
+                  background:   cheatUsed      ? '#111'
+                              : cheatAvailable ? '#7a1f00'
+                              : '#1c1c1c',
+                  border:       cheatAvailable && !cheatUsed ? '1px solid #ff5500' : '1px solid #333',
+                  borderRadius: 6,
+                  padding:      '4px 8px',
+                  color:        cheatUsed      ? '#333'
+                              : cheatAvailable ? '#fff'
+                              : '#3a3a3a',
+                  fontSize:     11,
+                  fontFamily:   'monospace',
+                  fontWeight:   'bold',
+                  display:      'flex',
+                  alignItems:   'center',
+                  gap:          3,
+                  boxShadow:    cheatAvailable && !cheatUsed ? '0 0 10px #ff550066' : 'none',
+                  transition:   'all 0.2s',
+                  animation:    cheatAvailable && !cheatUsed ? 'cheatPulse 1s ease-in-out infinite' : 'none',
+                }}
+              >
+                <span style={{ fontSize: 13, lineHeight: 1 }}>{cheatUsed ? '🚫' : '⏪'}</span>
+                <span style={{ fontSize: 8, letterSpacing: 0.5, lineHeight: 1 }}>{cheatUsed ? 'USED' : 'CHEAT'}</span>
+              </button>
+            </div>
           </div>
         </div>
       ) : (
@@ -707,28 +812,56 @@ export default function GameCanvas({ gameState, onGameOver }) {
           }}>
           {/* P1 solids */}
           <div style={{ display: 'flex', gap: ballGap, alignItems: 'center', flexShrink: 0 }}>
-            <span style={{ fontSize: 10, color: '#555', marginRight: 2 }}>
-              {!myType ? 'P1' : myType === 'solid' ? 'P1' : 'P2'}
+            <span style={{
+              fontSize: 10,
+              color: myType === 'solid' ? '#f5c518' : '#888',
+              marginRight: 4,
+              fontWeight: myType === 'solid' ? 'bold' : 'normal',
+              letterSpacing: 1,
+            }}>
+              {gameState?.mode === 'ai'
+                ? (myType === 'solid' ? '🟡 YOU' : myType === 'stripe' ? 'CPU' : 'P1')
+                : (!myType ? 'P1' : myType === 'solid' ? '● YOU' : '● OPP')}
             </span>
-            {[1,2,3,4,5,6,7].map(n => {
-              const isAssigned = myType !== null
-              const isPocketed = pocketed.includes(`solid-${n}`)
-              return (
-                <div key={n} style={{
-                  width: ballSz, height: ballSz, borderRadius: '50%',
-                  background: isAssigned ? getBallColor(n) : '#222',
-                  opacity:    isPocketed ? 0.2 : 1,
-                  border:     isAssigned ? 'none' : '1px solid #333',
-                  flexShrink: 0,
-                  transition: 'background 0.3s',
-                }} />
-              )
-            })}
+              {[1,2,3,4,5,6,7].map(n => {
+                const isAssigned = myType !== null
+                const isPocketed = pocketed.includes(`solid-${n}`)
+                const isMine     = myType === 'solid'
+                return (
+                  <div key={n} style={{
+                    width:      ballSz,
+                    height:     ballSz,
+                    borderRadius: '50%',
+                    background: isAssigned ? getBallColor(n) : '#2a2a2a',
+                    opacity:    isPocketed ? 0.15 : 1,
+                    border:     isPocketed
+                      ? '1px solid #222'
+                      : isMine
+                        ? `2px solid rgba(255,255,255,0.35)`
+                        : isAssigned ? '1px solid #444' : '1px solid #333',
+                    flexShrink: 0,
+                    transition: 'all 0.3s',
+                    boxShadow:  isMine && !isPocketed ? '0 0 4px rgba(255,220,80,0.4)' : 'none',
+                  }} />
+                )
+              })}
           </div>
 
           {/* Turn indicator + cheat */}
           <div style={{ textAlign: 'center', flexShrink: 0 }}>
-            {foul && <div style={{ color: '#ff4444', fontSize: 9, marginBottom: 2 }}>FOUL</div>}
+            {foul && (
+              <div style={{
+                color:        '#fff',
+                background:   '#cc0000',
+                fontSize:     10,
+                fontWeight:   'bold',
+                padding:      '2px 8px',
+                borderRadius: 4,
+                marginBottom: 4,
+                letterSpacing: 1,
+                animation:    'cheatPulse 0.8s ease-in-out infinite',
+              }}>⚠ FOUL — BALL IN HAND</div>
+            )}
             {placingCueBall && (
               <div style={{ color: '#ffaa00', fontSize: 9, marginBottom: 2 }}>BALL IN HAND</div>
             )}
@@ -750,37 +883,121 @@ export default function GameCanvas({ gameState, onGameOver }) {
                     ? (myTurn ? 'YOUR TURN' : 'THEIR TURN')
                     : (myTurn ? 'P1 TURN' : 'P2 TURN')}
               </div>
-              <button
-                title={cheatUsed ? 'Cheat already used' : cheatAvailable ? 'Undo this shot!' : 'Available while ball is rolling'}
-                onClick={handleCheat}
-                style={{
-                  cursor:       cheatAvailable && !cheatUsed ? 'pointer' : 'default',
-                  background:   cheatUsed      ? '#111'
-                              : cheatAvailable ? '#7a1f00'
-                              : '#1c1c1c',
-                  border:       cheatAvailable && !cheatUsed
-                                  ? '1px solid #ff5500'
-                                  : '1px solid #333',
-                  borderRadius: 6,
-                  padding:      '1px 6px',
-                  color:        cheatUsed      ? '#333'
-                              : cheatAvailable ? '#fff'
-                              : '#3a3a3a',
-                  fontSize:     11,
-                  fontFamily:   'monospace',
-                  fontWeight:   'bold',
-                  display:      'flex',
-                  alignItems:   'center',
-                  gap:          2,
-                  boxShadow:    cheatAvailable && !cheatUsed ? '0 0 10px #ff550066' : 'none',
-                  transition:   'all 0.2s',
-                  animation:    cheatAvailable && !cheatUsed ? 'cheatPulse 1s ease-in-out infinite' : 'none',
-                }}
-              >
-                <span style={{ fontSize: 11, lineHeight: 1 }}>{cheatUsed ? '🚫' : '⏪'}</span>
-                <span style={{ fontSize: 8, letterSpacing: 0.5, lineHeight: 1 }}>{cheatUsed ? 'USED' : 'CHEAT'}</span>
-              </button>
-              <div style={{ display: 'flex', alignItems: 'center', height: 36 }}>
+
+              {/* Cheat button + tooltip */}
+              <div style={{ position: 'relative' }}>
+                {showCheatTip && !cheatUsed && (
+                  <div style={{
+                    position:     'absolute',
+                    bottom:       '110%',
+                    left:         '50%',
+                    transform:    'translateX(-50%)',
+                    background:   '#1e1e1e',
+                    border:       '1px solid #444',
+                    borderRadius: 6,
+                    padding:      '6px 10px',
+                    width:        140,
+                    fontSize:     10,
+                    color:        '#ccc',
+                    fontFamily:   'monospace',
+                    lineHeight:   1.5,
+                    zIndex:       50,
+                    pointerEvents: 'auto',
+                    whiteSpace:   'normal',
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                      <span style={{ color: '#ff8844', fontWeight: 'bold' }}>⏪ CHEAT</span>
+                      <span
+                        onClick={() => setShowCheatTip(false)}
+                        style={{ cursor: 'pointer', color: '#666', fontSize: 11, lineHeight: 1 }}
+                      >✕</span>
+                    </div>
+                    While balls are rolling, press this to rewind the shot. One use per game.
+                    {/* Little arrow pointing down */}
+                    <div style={{
+                      position:   'absolute',
+                      bottom:     -6,
+                      left:       '50%',
+                      transform:  'translateX(-50%)',
+                      width:      0, height: 0,
+                      borderLeft:  '5px solid transparent',
+                      borderRight: '5px solid transparent',
+                      borderTop:   '6px solid #444',
+                    }} />
+                  </div>
+                )}
+                <button
+                  onClick={handleCheat}
+                  style={{
+                    cursor:       cheatAvailable && !cheatUsed ? 'pointer' : 'default',
+                    background:   cheatUsed      ? '#111'
+                                : cheatAvailable ? '#7a1f00'
+                                : '#1c1c1c',
+                    border:       cheatAvailable && !cheatUsed
+                                    ? '1px solid #ff5500'
+                                    : '1px solid #333',
+                    borderRadius: 6,
+                    padding:      '1px 6px',
+                    color:        cheatUsed      ? '#333'
+                                : cheatAvailable ? '#fff'
+                                : '#3a3a3a',
+                    fontSize:     11,
+                    fontFamily:   'monospace',
+                    fontWeight:   'bold',
+                    display:      'flex',
+                    alignItems:   'center',
+                    gap:          2,
+                    boxShadow:    cheatAvailable && !cheatUsed ? '0 0 10px #ff550066' : 'none',
+                    transition:   'all 0.2s',
+                    animation:    cheatAvailable && !cheatUsed ? 'cheatPulse 1s ease-in-out infinite' : 'none',
+                  }}
+                >
+                  <span style={{ fontSize: 11, lineHeight: 1 }}>{cheatUsed ? '🚫' : '⏪'}</span>
+                  <span style={{ fontSize: 8, letterSpacing: 0.5, lineHeight: 1 }}>{cheatUsed ? 'USED' : 'CHEAT'}</span>
+                </button>
+              </div>
+
+              {/* Spin picker + tooltip */}
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center', height: 36 }}>
+                {showSpinTip && (
+                  <div style={{
+                    position:     'absolute',
+                    bottom:       '110%',
+                    left:         '50%',
+                    transform:    'translateX(-50%)',
+                    background:   '#1e1e1e',
+                    border:       '1px solid #444',
+                    borderRadius: 6,
+                    padding:      '6px 10px',
+                    width:        148,
+                    fontSize:     10,
+                    color:        '#ccc',
+                    fontFamily:   'monospace',
+                    lineHeight:   1.5,
+                    zIndex:       50,
+                    pointerEvents: 'auto',
+                    whiteSpace:   'normal',
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                      <span style={{ color: '#ffdd44', fontWeight: 'bold' }}>◎ SPIN</span>
+                      <span
+                        onClick={() => setShowSpinTip(false)}
+                        style={{ cursor: 'pointer', color: '#666', fontSize: 11, lineHeight: 1 }}
+                      >✕</span>
+                    </div>
+                    Drag the dot to add spin. Center = no spin. Top/bottom = topspin/backspin. Left/right = sidespin.
+                    <div style={{
+                      position:   'absolute',
+                      bottom:     -6,
+                      left:       '50%',
+                      transform:  'translateX(-50%)',
+                      width:      0, height: 0,
+                      borderLeft:  '5px solid transparent',
+                      borderRight: '5px solid transparent',
+                      borderTop:   '6px solid #444',
+                    }} />
+                  </div>
+                )}
                 <SpinPicker size={36} spin={spin} onChange={handleSpinChange} />
               </div>
             </div>
@@ -800,22 +1017,36 @@ export default function GameCanvas({ gameState, onGameOver }) {
               const isAssigned = myType !== null
               const isPocketed = pocketed.includes(`stripe-${n}`)
               const borderPx   = Math.max(2, Math.round(3 * scale))
+              const isMine     = myType === 'stripe'
               return (
                 <div key={n} style={{
-                  width:      ballSz, height: ballSz, borderRadius: '50%',
-                  background: isAssigned ? '#fff' : '#222',
-                  opacity:    isPocketed ? 0.2 : 1,
-                  border:     isAssigned
-                    ? `${borderPx}px solid ${getBallColor(n)}`
-                    : '1px solid #333',
+                  width:      ballSz,
+                  height:     ballSz,
+                  borderRadius: '50%',
+                  background: isAssigned ? '#fff' : '#2a2a2a',
+                  opacity:    isPocketed ? 0.15 : 1,
+                  border:     isPocketed
+                    ? '1px solid #222'
+                    : isAssigned
+                      ? `${borderPx}px solid ${getBallColor(n)}`
+                      : '1px solid #333',
                   boxSizing:  'border-box',
                   flexShrink: 0,
-                  transition: 'border 0.3s, background 0.3s',
+                  transition: 'all 0.3s',
+                  boxShadow:  isMine && !isPocketed ? `0 0 4px ${getBallColor(n)}66` : 'none',
                 }} />
               )
             })}
-            <span style={{ fontSize: 10, color: '#555', marginLeft: 2 }}>
-              {!myType ? 'P2' : myType === 'stripe' ? 'P1' : 'P2'}
+            <span style={{
+              fontSize: 10,
+              color: myType === 'stripe' ? '#1a66cc' : '#888',
+              marginLeft: 4,
+              fontWeight: myType === 'stripe' ? 'bold' : 'normal',
+              letterSpacing: 1,
+            }}>
+              {gameState?.mode === 'ai'
+                ? (myType === 'stripe' ? '🔵 YOU' : myType === 'solid' ? 'CPU' : 'P2')
+                : (!myType ? 'P2' : myType === 'stripe' ? '● YOU' : '● OPP')}
             </span>
           </div>
         </div>
@@ -825,6 +1056,7 @@ export default function GameCanvas({ gameState, onGameOver }) {
         <PocketCallModal
           onCall={handlePocketCall}
           canvasRect={canvasRectRef.current}
+          showBanner={pocketCallVisible}
         />
       )}
     </div>

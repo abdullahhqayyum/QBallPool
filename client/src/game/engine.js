@@ -230,6 +230,7 @@ function _finishCheat(scene, onComplete) {
   scene.registry.set('myTurn',               myTurn)
   scene.registry.set('cheatUsed',            true)
   scene.registry.set('cheatAvailable',       false)
+  scene.registry.set('pendingResult',        null)
 
   useGameStore.setCheatUsed()
   useGameStore.setCheatAvailable(false)
@@ -287,22 +288,21 @@ function sceneCreate(gameState) {
   this._rewindPlaying   = false
   this.registry.set('pendingResult', null)
 
-  // Whether the opening break shot has been taken (prevents assigning types on the break)
-  // blocks assignment for break shot + its resulting turn-end
-  this.registry.set('breakDone', false)
-
   if (isRejoin && game?.my_type) {
     this.registry.set('myType',  game.my_type)
     this.registry.set('oppType', game.my_type === 'solid' ? 'stripe' : 'solid')
   } else {
+    // Always clear types for a fresh game — prevents stale values if engine is reused
     this.registry.set('myType',  null)
     this.registry.set('oppType', null)
+    this.registry.set('breakDone', false)   // guarantee reset for new games
   }
 
   // If ?testrack=1 is present, force types so pot/foul rules are active
   if (typeof window !== 'undefined' && window.location?.search?.includes('testrack=1')) {
     this.registry.set('myType',  'solid')
     this.registry.set('oppType', 'stripe')
+    this.registry.set('breakDone', true)   // skip break rules in test mode
   }
 
   // Decide if AI should go first (coin flip) and respawn cue ball AFTER registry state is set
@@ -398,7 +398,7 @@ function sceneUpdate() {
   const oppType = mt === 'solid' ? 'stripe' : mt === 'stripe' ? 'solid' : null
   const shooterType = myTurn ? mt : oppType
 
-  if (shooterType) {
+  if (shooterType && myTurn) {
     const shooterBalls  = allBalls.filter(b => b.type === shooterType)
     const eightBall     = allBalls.find(b => b.type === '8ball')
     const allCleared    = shooterBalls.length > 0 && shooterBalls.every(b => b.pocketed)
@@ -440,6 +440,14 @@ function sceneUpdate() {
       return
     }
 
+    // ── Settling guard: require several consecutive still frames before ending ──
+    // This prevents the turn ending (and game-over firing) on the very frame
+    // a ball disappears into a pocket. Give physics a few frames to settle.
+    const stillFrames = (this._stillFrameCount || 0) + 1
+    this._stillFrameCount = stillFrames
+    if (stillFrames < 3) return
+
+    this._stillFrameCount = 0
     this.registry.set('ballsWereMoving', false)
     this.registry.set('shotFired',       false)
 
@@ -456,31 +464,15 @@ function sceneUpdate() {
   }
 
   if (shotFired && moving) {
+    // Reset still-frame counter when balls resume moving
+    this._stillFrameCount = 0
     this.registry.set('ballsWereMoving', true)
 
     // Open cheat window once balls are moving (only if not yet used)
-    if (!this.registry.get('cheatUsed') && !this.registry.get('cheatAvailable')) {
-      this.registry.set('cheatAvailable', true)
-      useGameStore.setCheatAvailable(true)
-    }
-  }
-
-  if (shotFired && moving) {
-    this.registry.set('ballsWereMoving', true)
-
-    // Open cheat window once balls are moving (only if not yet used)
-    if (!this.registry.get('cheatUsed') && !this.registry.get('cheatAvailable')) {
-      this.registry.set('cheatAvailable', true)
-      useGameStore.setCheatAvailable(true)
-    }
-  }
-
-  if (shotFired && moving) {
-    this.registry.set('ballsWereMoving', true)
-
-    // Open the cheat window once balls are actually in motion
-    // (only if this player hasn't used their cheat yet)
-    if (!this.registry.get('cheatUsed') && !this.registry.get('cheatAvailable')) {
+    const isMyTurnForCheat = this.registry.get('myTurn')
+    const modeForCheat = this.registry.get('mode')
+    const cheatAllowedThisTurn = modeForCheat === 'offline' || isMyTurnForCheat
+    if (!this.registry.get('cheatUsed') && !this.registry.get('cheatAvailable') && cheatAllowedThisTurn) {
       this.registry.set('cheatAvailable', true)
       useGameStore.setCheatAvailable(true)
     }
@@ -523,11 +515,12 @@ function handlePocket(scene, ball) {
   if (ball.type === '8ball') {
     const myType  = scene.registry.get('myType')
     const balls   = scene.registry.get('balls') || []
-    const myTurn  = scene.registry.get('myTurn')
+    const myTurn  = scene.registry.get('myTurn')   // true = player1's turn
     const oppType = myType === 'solid' ? 'stripe' : 'solid'
 
     if (!myType) {
-      scene.registry.set('pendingResult', 'loss')
+      // 8-ball potted before types assigned — shooter always loses
+      scene.registry.set('pendingResult', myTurn ? 'loss' : 'win')
       return
     }
 
@@ -538,21 +531,30 @@ function handlePocket(scene, ball) {
 
     const shooterType  = myTurn ? myType : oppType
     const shooterBalls = balls.filter(b => b.type === shooterType)
+    // A ball pocketed this same turn counts as cleared — check ALL of that type
     const allCleared   = shooterBalls.length > 0 && shooterBalls.every(b => b.pocketed)
 
     if (!allCleared) {
+      // Shooter potted 8-ball too early — shooter loses
       scene.registry.set('pendingResult', myTurn ? 'loss' : 'win')
       return
     }
 
     const calledPocket = scene.registry.get('calledPocket')
     if (calledPocket === null || calledPocket === undefined) {
+      // No pocket was called — shooter loses
       scene.registry.set('pendingResult', myTurn ? 'loss' : 'win')
       return
     }
 
-    const result = actualPocketIdx === calledPocket ? 'win' : 'loss'
-    scene.registry.set('pendingResult', myTurn ? result : (result === 'win' ? 'loss' : 'win'))
+    // Correct pocket called and potted — shooter wins; wrong pocket — shooter loses
+    const shooterWins = actualPocketIdx === calledPocket
+    // pendingResult is ALWAYS from player1's perspective (myTurn=true means p1 shot)
+    scene.registry.set('pendingResult', 
+      myTurn
+        ? (shooterWins ? 'win' : 'loss')
+        : (shooterWins ? 'loss' : 'win')   // p2 won means p1 lost
+    )
   }
 }
 
@@ -645,26 +647,24 @@ function handleTurnEnd(scene) {
     const firstBall = balls.find(b => b.label === firstCueContactLabel)
     const firstType = firstBall?.type
 
-    if (!firstType) {
-      scene.registry.set('foul', true)
-      switchTurn(scene)
-      handleFoulBallInHand()
-      return
-    }
+    // If the first-contact ball can't be resolved (e.g. it pocketed this
+    // frame and was removed from the active list), do NOT treat it as an
+    // automatic foul — fall through to normal resolution instead.
+    if (firstType) {
+      let firstContactFoul = false
+      if (firstType === '8ball') {
+        const shooterBalls = balls.filter(b => b.type === expectedType)
+        firstContactFoul   = !shooterBalls.every(b => b.pocketed)
+      } else if (firstType !== expectedType) {
+        firstContactFoul = true
+      }
 
-    let firstContactFoul = false
-    if (firstType === '8ball') {
-      const shooterBalls = balls.filter(b => b.type === expectedType)
-      firstContactFoul   = !shooterBalls.every(b => b.pocketed)
-    } else if (firstType !== expectedType) {
-      firstContactFoul = true
-    }
-
-    if (firstContactFoul) {
-      scene.registry.set('foul', true)
-      switchTurn(scene)
-      handleFoulBallInHand()
-      return
+      if (firstContactFoul) {
+        scene.registry.set('foul', true)
+        switchTurn(scene)
+        handleFoulBallInHand()
+        return
+      }
     }
   }
 
@@ -707,12 +707,12 @@ function handleTurnEnd(scene) {
     ? objectBalls.filter(b => b.type === finalExpectedType)
     : objectBalls.filter(b => b.type === 'solid' || b.type === 'stripe')
 
-  // ── Check if all my balls are now cleared — prompt pocket call for 8-ball ──
-  if (finalMine && finalMyType) {
-    const allBalls   = scene.registry.get('balls') || []
-    const myRemaining = allBalls.filter(b => b.type === finalMyType && !b.pocketed)
-    if (myRemaining.length === 0) {
-      // Last ball just went in — open pocket selector, block shooting until chosen
+  // Check if the current shooter just cleared all their balls — open pocket call for EITHER player
+  const shooterTypeForCall = finalMine ? finalMyType : scene.registry.get('oppType')
+  if (shooterTypeForCall) {
+    const allBalls_ = scene.registry.get('balls') || []
+    const remaining = allBalls_.filter(b => b.type === shooterTypeForCall && !b.pocketed)
+    if (remaining.length === 0) {
       useGameStore.setSelectingPocket(true)
       useGameStore.setCalledPocket(null)
       scene.registry.set('calledPocket', null)
@@ -728,11 +728,17 @@ function handleTurnEnd(scene) {
   }
 }
 function switchTurn(scene) {
-  scene.registry.set('myTurn', !scene.registry.get('myTurn'))
+  const wasMyTurn = scene.registry.get('myTurn')
+  scene.registry.set('myTurn', !wasMyTurn)
+  // Always wipe the called pocket on turn change — prevents stale value
+  // from one player's call leaking into the next player's 8-ball check
+  scene.registry.set('calledPocket', null)
+  useGameStore.setCalledPocket(null)
   // Clear any stale AI thinking lock so CPU can respond immediately
   try {
     scene._aiThinking = false
   } catch (e) {}
+  console.log(`[switchTurn] p1Turn was=${wasMyTurn} → now=${!wasMyTurn}`)
 }
 
 function notify(scene, payload) {

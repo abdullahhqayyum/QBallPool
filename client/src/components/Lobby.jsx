@@ -158,7 +158,19 @@ export default function Lobby({ onStart, user }) {
   }
 
   async function handleFeedbackSubmit() {
-    if (!feedbackMsg.trim() || !feedbackName.trim()) return
+    // Require name, message, AND email
+    if (!feedbackMsg.trim() || !feedbackName.trim() || !feedbackEmail.trim()) {
+      setFeedbackStatus('invalid')
+      return
+    }
+
+    // Basic email validation
+    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRe.test(feedbackEmail.trim())) {
+      setFeedbackStatus('invalid')
+      return
+    }
+
     setFeedbackStatus('sending')
     try {
       const res = await fetch(`https://formspree.io/f/${FORMSPREE_ID}`, {
@@ -166,10 +178,10 @@ export default function Lobby({ onStart, user }) {
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body:    JSON.stringify({
           name:     feedbackName.trim(),
-          email:    feedbackEmail.trim() || undefined,
+          email:    feedbackEmail.trim(),
           message:  feedbackMsg.trim(),
           _subject: `Q-Ball Feedback from ${feedbackName.trim()}`,
-          _replyto: feedbackEmail.trim() || undefined,
+          _replyto: feedbackEmail.trim(),
         }),
       })
       if (res.ok) {
@@ -548,7 +560,7 @@ export default function Lobby({ onStart, user }) {
               {/* Email */}
               <div>
                 <label style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: MUTED, textTransform: 'uppercase', display: 'block', marginBottom: 6 }}>
-                  Email <span style={{ color: MUTED, fontWeight: 400 }}>(optional — so we can reply)</span>
+                  Email <span style={{ color: ACCENT2 }}>*</span>
                 </label>
                 <input
                   placeholder="you@example.com"
@@ -615,20 +627,28 @@ export default function Lobby({ onStart, user }) {
                 }}>
                   Something went wrong — try again.
                 </div>
+              ) : feedbackStatus === 'invalid' ? (
+                <div style={{
+                  background: '#ffdddd', border: '1.5px solid #ff7777',
+                  borderRadius: 10, padding: '12px 16px',
+                  color: '#660000', fontSize: 13, textAlign: 'center',
+                }}>
+                  Please provide a valid email address so we can reply.
+                </div>
               ) : (
                 <button
                   onClick={handleFeedbackSubmit}
-                  disabled={!feedbackMsg.trim() || !feedbackName.trim() || feedbackStatus === 'sending'}
+                  disabled={!feedbackMsg.trim() || !feedbackName.trim() || !feedbackEmail.trim() || feedbackStatus === 'sending'}
                   style={{
                     padding:       '13px',
                     borderRadius:  10,
                     border:        'none',
-                    background:    feedbackMsg.trim() && feedbackName.trim() ? TEXT : '#e0ddd6',
-                    color:         feedbackMsg.trim() && feedbackName.trim() ? BG : MUTED,
+                    background:    feedbackMsg.trim() && feedbackName.trim() && feedbackEmail.trim() ? TEXT : '#e0ddd6',
+                    color:         feedbackMsg.trim() && feedbackName.trim() && feedbackEmail.trim() ? BG : MUTED,
                     fontFamily:    'inherit',
                     fontSize:      13,
                     fontWeight:    700,
-                    cursor:        feedbackMsg.trim() && feedbackName.trim() ? 'pointer' : 'default',
+                    cursor:        feedbackMsg.trim() && feedbackName.trim() && feedbackEmail.trim() ? 'pointer' : 'default',
                     transition:    'all 0.15s',
                     letterSpacing: 1,
                   }}

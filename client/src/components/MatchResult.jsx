@@ -1,7 +1,19 @@
 import React from 'react'
 
 export default function MatchResult({ result, onRematch, onHome }) {
-  const won = result === 'win'
+  // `result` may be either:
+  // - 'win' | 'loss' (online / AI mode — local player's perspective)
+  // - { winner: 'P1' | 'P2' } (offline 2P — absolute winner)
+  const isOffline = result && typeof result === 'object'
+  const won = isOffline ? null : result === 'win'
+
+  const trophy = isOffline ? '🏆' : (won ? '🏆' : '💀')
+  const headline = isOffline
+    ? `${result.winner} Wins!`
+    : (won ? 'You Win!' : 'You Lose')
+  const subtitle = isOffline
+    ? `${result.winner === 'P1' ? 'P2' : 'P1'} better luck next time.`
+    : (won ? 'Nice shot, legend.' : 'Better luck next time.')
 
   return (
     <div style={{
@@ -10,15 +22,9 @@ export default function MatchResult({ result, onRematch, onHome }) {
       alignItems: 'center', justifyContent: 'center',
       fontFamily: 'monospace', color: '#fff'
     }}>
-      <div style={{ fontSize: 64, marginBottom: 16 }}>
-        {won ? '🏆' : '💀'}
-      </div>
-      <h2 style={{ fontSize: 32, margin: '0 0 8px' }}>
-        {won ? 'You Win!' : 'You Lose'}
-      </h2>
-      <p style={{ color: '#666', marginBottom: 32 }}>
-        {won ? 'Nice shot, legend.' : 'Better luck next time.'}
-      </p>
+      <div style={{ fontSize: 64, marginBottom: 16 }}>{trophy}</div>
+      <h2 style={{ fontSize: 32, margin: '0 0 8px' }}>{headline}</h2>
+      <p style={{ color: '#666', marginBottom: 32 }}>{subtitle}</p>
       <div style={{ display: 'flex', gap: 12 }}>
         <button
           onClick={onRematch}

@@ -1,3 +1,4 @@
+// AFTER
 export const TABLE = {
   width:  800,
   height: 400,
@@ -6,6 +7,9 @@ export const TABLE = {
   playX2: 778,
   playY1: 22,
   playY2: 378,
+  // Extra logical space beyond the cushion where the cue stick can extend.
+  // Physics boundaries stay the same — only the AIM LINE is allowed past this.
+  cueAimBuffer: 60,
 }
 
 export const BALL = {
@@ -31,7 +35,7 @@ export const POCKET = {
 
 export const CUE = {
   maxPower: 18,
-  aimLineLength: 180,
+  aimLineLength: 240,
   dragForMaxPower: 70,
   minForce: 0.006,
   maxForce: 0.13,
