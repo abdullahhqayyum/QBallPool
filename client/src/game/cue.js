@@ -275,6 +275,13 @@ export function setupCue(scene, onShoot) {
     if (!canShoot(scene)) return
     const gp = toGame(ptr)
     const cueBall = getCueBall(scene)
+    // Don't start drag from inside the cushion zone
+    const railBuffer = BALL.radius * 1.5
+    if (
+      gp.x < TABLE.playX1 + railBuffer || gp.x > TABLE.playX2 - railBuffer ||
+      gp.y < TABLE.playY1 + railBuffer || gp.y > TABLE.playY2 - railBuffer
+    ) return
+
     dragStart   = gp
     dragCurrent = gp
     // Lock the aim angle right now — it will not change as the player drags back
@@ -309,6 +316,13 @@ const handleWindowMouseDown = (evt) => {
   // Must not be clicking ON the cue ball (that's placement drag)
   if (Math.hypot(gp.x - cueBall.x, gp.y - cueBall.y) < BALL.radius * 4) return
 
+  // Don't start drag if pointer is inside the cushion (prevents stuck angles near rails)
+  const railBuffer = BALL.radius * 1.5
+  if (
+    gp.x < TABLE.playX1 + railBuffer || gp.x > TABLE.playX2 - railBuffer ||
+    gp.y < TABLE.playY1 + railBuffer || gp.y > TABLE.playY2 - railBuffer
+  ) return
+
   dragStart   = gp
   dragCurrent = gp
   lockedAngle = Math.atan2(cueBall.y - gp.y, cueBall.x - gp.x)
@@ -330,6 +344,13 @@ const handleWindowTouchStart = (evt) => {
     gp.y < TABLE.playY1 - buffer || gp.y > TABLE.playY2 + buffer
   ) return
   if (Math.hypot(gp.x - cueBall.x, gp.y - cueBall.y) < BALL.radius * 4) return
+
+  // Don't start drag if pointer is inside the cushion (prevents stuck angles near rails)
+  const railBuffer = BALL.radius * 1.5
+  if (
+    gp.x < TABLE.playX1 + railBuffer || gp.x > TABLE.playX2 - railBuffer ||
+    gp.y < TABLE.playY1 + railBuffer || gp.y > TABLE.playY2 - railBuffer
+  ) return
 
   dragStart   = gp
   dragCurrent = gp
@@ -404,10 +425,17 @@ function drawAimLine(scene, ptr) {
 
   aimLine.clear()
 
+  const cueStartX = cx - Math.cos(angle) * BALL.radius
+  const cueStartY = cy - Math.sin(angle) * BALL.radius
+  const cueRawEndX = cx - Math.cos(angle) * (BALL.radius + CUE.aimLineLength)
+  const cueRawEndY = cy - Math.sin(angle) * (BALL.radius + CUE.aimLineLength)
+  // Clamp cue stick end so it never draws through the cushion
+  const cueEndX = Math.max(TABLE.playX1 + 2, Math.min(TABLE.playX2 - 2, cueRawEndX))
+  const cueEndY = Math.max(TABLE.playY1 + 2, Math.min(TABLE.playY2 - 2, cueRawEndY))
   aimLine.lineStyle(1.5, 0xd4a96a, 0.6)
   aimLine.beginPath()
-  aimLine.moveTo(cx - Math.cos(angle) * BALL.radius, cy - Math.sin(angle) * BALL.radius)
-  aimLine.lineTo(cx - Math.cos(angle) * (BALL.radius + CUE.aimLineLength), cy - Math.sin(angle) * (BALL.radius + CUE.aimLineLength))
+  aimLine.moveTo(cueStartX, cueStartY)
+  aimLine.lineTo(cueEndX, cueEndY)
   aimLine.strokePath()
 
   const hit = getFirstHitBall(scene, cx, cy, angle)
