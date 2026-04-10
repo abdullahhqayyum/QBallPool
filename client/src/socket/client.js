@@ -6,10 +6,14 @@ const socket     = io(SERVER_URL, { autoConnect: false })
 let _scene = null
 let _onTurnDone = null
 let _onGameOver = null
+let _onRematchRequested = null
+let _onRematchStart     = null
 
 export function setScene(scene) { _scene = scene }
 export function setOnTurnDone(cb) { _onTurnDone = cb }
 export function setOnGameOver(cb) { _onGameOver = cb }
+export function setOnRematchRequested(cb) { _onRematchRequested = cb }
+export function setOnRematchStart(cb)     { _onRematchStart     = cb }
 
 export function connectSocket()    { socket.connect() }
 export function disconnectSocket() { socket.disconnect() }
@@ -21,8 +25,8 @@ export function joinRoom(roomId, playerId, gameId) {
   socket.emit('join_room', { code: roomId, roomId, playerId, gameId })
 }
 
-export function sendTurnComplete(gameId, ballState, nextTurnPlayerId, ballInHand) {
-  socket.emit('turn_complete', { gameId, ballState, nextTurnPlayerId, ballInHand })
+export function sendTurnComplete(gameId, ballState, nextTurnPlayerId, ballInHand, shooterType, receiverType) {
+  socket.emit('turn_complete', { gameId, ballState, nextTurnPlayerId, ballInHand, shooterType, receiverType })
 }
 
 export function sendBallPositions(positions) {
@@ -33,7 +37,10 @@ export function sendGameOver(gameId, winnerId) {
   socket.emit('game_over', { gameId, winnerId })
 }
 
-socket.on('turn_done', ({ nextTurnPlayerId, ballState, ballInHand }) => {
+export function sendRematchRequest() { socket.emit('rematch_request') }
+export function sendRematchCancel()  { socket.emit('rematch_cancel') }
+
+socket.on('turn_done', ({ nextTurnPlayerId, ballState, ballInHand, shooterType, receiverType }) => {
   console.log('[turn_done received] nextTurnPlayerId:', nextTurnPlayerId, 'userId:', _scene?.registry.get('userId'), 'ballInHand:', ballInHand)
   if (!_scene) return
   const userId = _scene.registry.get('userId')
@@ -43,8 +50,16 @@ socket.on('turn_done', ({ nextTurnPlayerId, ballState, ballInHand }) => {
   Object.keys(remoteTargets).forEach(k => delete remoteTargets[k])
   _scene.registry.set('myTurn', isMyTurn)
   if (_onTurnDone) {
-    _onTurnDone(ballState, isMyTurn, ballInHand)
+    _onTurnDone(ballState, isMyTurn, ballInHand, shooterType, receiverType)
   }
+})
+
+socket.on('rematch_requested', () => {
+  if (_onRematchRequested) _onRematchRequested()
+})
+
+socket.on('rematch_start', ({ player1_id, player2_id, current_turn }) => {
+  if (_onRematchStart) _onRematchStart({ player1_id, player2_id, current_turn })
 })
 
 // Target positions for smooth interpolation — keyed by ball label

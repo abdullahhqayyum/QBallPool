@@ -789,9 +789,18 @@ function notify(scene, payload) {
   if (mode === 'online' && gameId && userId && opponentId) {
     const nextTurnPlayerId = myTurnNow ? userId : opponentId
     const ballInHand = !!scene.registry.get('placingCueBall')
-    console.log('[notify] mode:', mode, 'ballInHand:', !!scene.registry.get('placingCueBall'), 'myTurnNow:', myTurnNow)
+    // Send type assignment so the opponent's client can update their HUD
+    // engineMyType is always from local player's perspective (player1)
+    // engineOppType is what the opponent should set as their myType
+    console.log('[notify] mode:', mode, 'ballInHand:', ballInHand, 'myTurnNow:', myTurnNow, 'myType:', engineMyType, 'oppType:', engineOppType)
     import('../socket/client').then(({ sendTurnComplete }) => {
-      sendTurnComplete(gameId, ballState, nextTurnPlayerId, ballInHand)
+      // Send types from absolute perspective:
+      // shooterType = what the player who just shot has
+      // receiverType = what the opponent has
+      // myTurnNow is AFTER switchTurn, so: if it's now my turn, I was the receiver, opponent was shooter
+      const shooterType   = myTurnNow ? engineOppType : engineMyType
+      const receiverType  = myTurnNow ? engineMyType  : engineOppType
+      sendTurnComplete(gameId, ballState, nextTurnPlayerId, ballInHand, shooterType, receiverType)
     })
   }
 

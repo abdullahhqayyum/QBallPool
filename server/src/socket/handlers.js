@@ -87,7 +87,7 @@ function registerHandlers(io, socket) {
     }
   })
 
-  socket.on('turn_complete', async ({ gameId, ballState, nextTurnPlayerId, ballInHand }) => {
+  socket.on('turn_complete', async ({ gameId, ballState, nextTurnPlayerId, ballInHand, shooterType, receiverType }) => {
     console.log('[turn_complete] received, ballInHand:', ballInHand, 'nextTurn:', nextTurnPlayerId)
     const roomId = socket.data.roomId
     if (!roomId) return
@@ -121,7 +121,9 @@ function registerHandlers(io, socket) {
       socket.to(roomId).emit('turn_done', {
         nextTurnPlayerId,
         ballState,
-        ballInHand: !!ballInHand,
+        ballInHand:   !!ballInHand,
+        shooterType:  shooterType  || null,
+        receiverType: receiverType || null,
       })
     } catch (err) {
       console.error('Failed to save turn:', err)
@@ -134,6 +136,40 @@ function registerHandlers(io, socket) {
     const roomId = socket.data.roomId
     if (!roomId) return
     socket.to(roomId).emit('ball_positions', { positions })
+  })
+
+  // Rematch flow: players can request a rematch; when both have requested start a fresh game
+  socket.on('rematch_request', () => {
+    const roomId = socket.data.roomId
+    if (!roomId) return
+    const room = RoomManager.getRoom(roomId)
+    if (!room) return
+
+    if (!room.rematchVotes) room.rematchVotes = new Set()
+    room.rematchVotes.add(socket.data.playerId)
+
+    // Tell the opponent someone wants a rematch
+    socket.to(roomId).emit('rematch_requested')
+
+    // Both players voted — start rematch
+    if (room.rematchVotes.size >= 2) {
+      room.rematchVotes.clear()
+      room.ballState   = null
+      room.currentTurn = room.players[0]?.playerId || null
+      io.to(roomId).emit('rematch_start', {
+        player1_id:   room.players[0]?.playerId,
+        player2_id:   room.players[1]?.playerId,
+        current_turn: room.currentTurn,
+      })
+    }
+  })
+
+  socket.on('rematch_cancel', () => {
+    const roomId = socket.data.roomId
+    if (!roomId) return
+    const room = RoomManager.getRoom(roomId)
+    if (!room) return
+    room.rematchVotes?.delete(socket.data.playerId)
   })
 
   socket.on('game_over', async ({ gameId, winnerId }) => {

@@ -167,6 +167,8 @@ export default function GameCanvas({ gameState, onGameOver }) {
   const gameRef      = useRef(null)
   const canvasRectRef = useRef(null)
   const hudRef = useRef(null)
+  const _notifyOpponentWantsRematchRef = useRef(null)
+  const [engineKey, setEngineKey] = useState(0)
 
   const [myTurn,   setMyTurn]   = useState(true)
   const [myType,   setMyType]   = useState(null)
@@ -228,6 +230,7 @@ export default function GameCanvas({ gameState, onGameOver }) {
   useEffect(() => {
     if (!containerRef.current) return
     if (gameRef.current) return
+    // engineKey in deps causes this to re-run on rematch
 
     gameRef.current = initEngine(
       'game-container',
@@ -291,6 +294,8 @@ export default function GameCanvas({ gameState, onGameOver }) {
 
     // TO:
     if (gameState?.mode === 'online') {
+      // Rematch notifier ref
+      const _notifyOpponentWantsRematch = _notifyOpponentWantsRematchRef?.current
       const initOnline = () => {
         import('../socket/client').then(({ setScene, setOnTurnDone, joinRoom }) => {
           const scene = gameRef.current?.scene?.scenes?.[0]
@@ -315,10 +320,20 @@ export default function GameCanvas({ gameState, onGameOver }) {
             })
           })
 
-          setOnTurnDone((ballState, isMyTurn, ballInHand) => {
-            console.log('[turn_done] isMyTurn:', isMyTurn, 'ballInHand:', ballInHand, 'ballState cue:', ballState?.find?.(b => b.label === 'cue'))
+          setOnTurnDone((ballState, isMyTurn, ballInHand, shooterType, receiverType) => {
+            console.log('[turn_done] isMyTurn:', isMyTurn, 'ballInHand:', ballInHand, 'shooterType:', shooterType, 'receiverType:', receiverType)
             const currentScene = gameRef.current?.scene?.scenes?.[0]
             if (!currentScene || !ballState) return
+
+            // shooterType = type of whoever just shot
+            // receiverType = type of whoever is receiving this turn_done
+            // isMyTurn tells us: if true, I was the receiver (opponent just shot)
+            //                    if false, I was the shooter (I just shot, now waiting)
+            // So: if isMyTurn → I am the receiver → my type is receiverType
+            //     if !isMyTurn → I was the shooter → my type is shooterType
+            const myNewType  = isMyTurn ? receiverType : shooterType
+            const oppNewType = isMyTurn ? shooterType  : receiverType
+
             import('../game/balls').then(({ rehydrateBalls }) => {
               rehydrateBalls(currentScene, ballState)
               currentScene.registry.set('shotFired',            false)
@@ -328,46 +343,91 @@ export default function GameCanvas({ gameState, onGameOver }) {
               currentScene.registry.set('railHitAfterContact',  false)
               currentScene.registry.set('pocketedThisTurn',     [])
               currentScene.registry.set('foul',                 false)
-              currentScene.registry.set('placingCueBall',       false)
               currentScene.registry.set('myTurn',               isMyTurn)
-              if (ballInHand) {
-                import('../game/engine').then(({ respawnCueBall }) => {
-                  if (isMyTurn) {
-                    respawnCueBall(currentScene, null, false)
-                  } else {
-                    // Just make cue ball visible at its position for the waiting player
-                    const balls   = currentScene.registry.get('balls') || []
-                    const cueBall = balls.find(b => b.label === 'cue')
-                    if (cueBall) {
-                      cueBall.pocketed  = false
-                      cueBall.vx        = 0
-                      cueBall.vy        = 0
-                      cueBall._placing  = false   // ← prevents drag hijack
-                      if (cueBall.gfx) {
-                        cueBall.gfx.setPosition(cueBall.x, cueBall.y)
-                        cueBall.gfx.setVisible(true)
-                        cueBall.gfx.setAlpha(1)
-                      }
-                    }
-                  }
 
-                  // Ensure no placement mode is active on the spectating client
-                  currentScene.registry.set('placingCueBall', false)
-                  if (typeof currentScene._cueBallPlacementCleanup === 'function') {
-                    currentScene._cueBallPlacementCleanup()
-                    currentScene._cueBallPlacementCleanup = null
-                  }
+              // Apply type assignments if they arrived
+              if (myNewType) {
+                currentScene.registry.set('myType',  myNewType)
+                currentScene.registry.set('oppType', oppNewType)
+                setMyType(myNewType)
+              }
+
+              if (ballInHand && isMyTurn) {
+                // It's our turn with ball in hand — set placing THEN respawn
+                currentScene.registry.set('placingCueBall', true)
+                import('../game/engine').then(({ respawnCueBall }) => {
+                  respawnCueBall(currentScene, null, false)
                 })
+                setPlacingCueBall(true)
+              } else {
+                // Not our turn, or no ball in hand — ensure clean non-placing state
+                currentScene.registry.set('placingCueBall', false)
+                const balls   = currentScene.registry.get('balls') || []
+                const cueBall = balls.find(b => b.label === 'cue')
+                if (cueBall) {
+                  cueBall.pocketed = false
+                  cueBall.vx       = 0
+                  cueBall.vy       = 0
+                  cueBall._placing = false
+                  if (cueBall.gfx) {
+                    cueBall.gfx.setPosition(cueBall.x, cueBall.y)
+                    cueBall.gfx.setVisible(true)
+                    cueBall.gfx.setAlpha(1)
+                  }
+                }
+                if (typeof currentScene._cueBallPlacementCleanup === 'function') {
+                  currentScene._cueBallPlacementCleanup()
+                  currentScene._cueBallPlacementCleanup = null
+                }
+                setPlacingCueBall(false)
               }
 
               setWaitingForOpponent(!isMyTurn)
               setMyTurn(isMyTurn)
-              setPlacingCueBall(!!(isMyTurn && ballInHand))
             })
           })
 
           setWaitingForOpponent(!myTurnNow)
           joinRoom(gameState.game.id, gameState.user.id, gameState.game.id)
+          import('../socket/client').then(({ setOnRematchRequested, setOnRematchStart }) => {
+            setOnRematchRequested(() => {
+              if (_notifyOpponentWantsRematchRef.current) _notifyOpponentWantsRematchRef.current()
+            })
+            setOnRematchStart(({ player1_id, player2_id, current_turn }) => {
+              const userId    = gameState.user.id
+              const myTurnNow = current_turn === userId
+
+              // Update gameState.game in place so the new engine gets correct player IDs
+              gameState.game.player1_id   = player1_id
+              gameState.game.player2_id   = player2_id
+              gameState.game.current_turn = current_turn
+              gameState.game.ball_state   = null
+              gameState.game.my_type      = null
+
+              // Destroy the current Phaser instance cleanly
+              import('../game/engine').then(({ destroyEngine }) => {
+                destroyEngine(gameRef.current)
+                gameRef.current = null
+              })
+
+              // Reset all React state
+              setResult(null)
+              setWaitingForOpponent(!myTurnNow)
+              setMyTurn(myTurnNow)
+              setMyType(null)
+              setPocketed([])
+              setFoul(false)
+              setCalledPocket(null)
+              setNeedsPocketCall(false)
+              setPlacingCueBall(false)
+              setCheatUsed(false)
+              setCheatAvailable(false)
+
+              // Bump engineKey — this remounts the game container div and
+              // triggers a new initEngine call via the useEffect
+              setEngineKey(k => k + 1)
+            })
+          })
         })
       }
       initOnline()
@@ -433,12 +493,11 @@ export default function GameCanvas({ gameState, onGameOver }) {
       const alreadyCalled = scene.registry.get('calledPocket') !== null &&
                             scene.registry.get('calledPocket') !== undefined
 
-      if (allDone && eightLeft && !alreadyCalled) {
+      if (isMine && allDone && eightLeft && !alreadyCalled) {
         setNeedsPocketCall(true)
         setPocketCallVisible(true)
-        // Banner auto-hides after 4s — pocket targets stay active
         setTimeout(() => setPocketCallVisible(false), 4000)
-      } else if (alreadyCalled || !eightLeft) {
+      } else if (!isMine || alreadyCalled || !eightLeft) {
         setNeedsPocketCall(false)
         setPocketCallVisible(false)
       }
@@ -447,14 +506,16 @@ export default function GameCanvas({ gameState, onGameOver }) {
     return () => {
       clearInterval(syncInterval)
       if (gameState?.mode === 'online') {
-        import('../socket/client').then(({ setOnTurnDone, setOnGameOver }) => {
+        import('../socket/client').then(({ setOnTurnDone, setOnGameOver, setOnRematchRequested, setOnRematchStart }) => {
           setOnTurnDone(null)
           setOnGameOver(null)
+          setOnRematchRequested(null)
+          setOnRematchStart(null)
         })
       }
       destroyEngine(gameRef.current)
     }
-  }, [])
+  }, [engineKey])
 
   function handlePocketCall(pocketIndex) {
     const scene = gameRef.current?.scene?.scenes?.[0]
@@ -489,8 +550,11 @@ export default function GameCanvas({ gameState, onGameOver }) {
     return (
       <MatchResult
         result={result}
+        isOnline={gameState?.mode === 'online'}
         onRematch={() => { setResult(null); onGameOver('rematch') }}
         onHome={() => onGameOver('home')}
+        onRematchRequest={(cb) => { _notifyOpponentWantsRematchRef.current = cb }}
+        onRematchCancel={() => {}}
       />
     )
   }
@@ -551,6 +615,7 @@ export default function GameCanvas({ gameState, onGameOver }) {
           }),
         }}>
           <div
+          key={engineKey}
           id="game-container"
           ref={containerRef}
           style={{
