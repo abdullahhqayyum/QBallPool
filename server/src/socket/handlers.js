@@ -133,12 +133,17 @@ function registerHandlers(io, socket) {
     const roomId = socket.data.roomId
     if (!roomId) return
 
-    try {
-      const { endGame } = require('../db/games')
-      await endGame(gameId, winnerId)
-      io.to(roomId).emit('game_over', { winnerId })
-    } catch (err) {
-      console.error('Failed to end game:', err)
+    // Always tell both players the game is over — never gate on DB
+    io.to(roomId).emit('game_over', { winnerId })
+
+    // Persist result only when we have real UUIDs (not guest room codes)
+    if (isUuid(gameId) && isUuid(winnerId)) {
+      try {
+        const { endGame } = require('../db/games')
+        await endGame(gameId, winnerId)
+      } catch (err) {
+        console.error('Failed to save game result:', err)
+      }
     }
   })
 

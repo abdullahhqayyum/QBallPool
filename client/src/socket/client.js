@@ -5,9 +5,11 @@ const socket     = io(SERVER_URL, { autoConnect: false })
 
 let _scene = null
 let _onTurnDone = null
+let _onGameOver = null
 
 export function setScene(scene) { _scene = scene }
 export function setOnTurnDone(cb) { _onTurnDone = cb }
+export function setOnGameOver(cb) { _onGameOver = cb }
 
 export function connectSocket()    { socket.connect() }
 export function disconnectSocket() { socket.disconnect() }
@@ -72,6 +74,8 @@ socket.on('game_over', ({ winnerId }) => {
   if (!_scene) return
   const userId = _scene.registry.get('userId')
   _scene.registry.set('gameResult', winnerId === userId ? 'win' : 'loss')
+  const result = winnerId === userId ? 'win' : 'loss'
+  if (_onGameOver) _onGameOver(result)
 })
 
 socket.on('error', ({ message }) => {

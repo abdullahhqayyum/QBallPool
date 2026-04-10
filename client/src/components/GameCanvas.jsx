@@ -308,6 +308,13 @@ export default function GameCanvas({ gameState, onGameOver }) {
           scene.registry.set('opponentId', userId === p1 ? p2 : p1)
           scene.registry.set('myTurn',     myTurnNow)
 
+          import('../socket/client').then(({ setOnGameOver }) => {
+            setOnGameOver((result) => {
+              setWaitingForOpponent(false)
+              setResult(result)
+            })
+          })
+
           setOnTurnDone((ballState, isMyTurn, ballInHand) => {
             console.log('[turn_done] isMyTurn:', isMyTurn, 'ballInHand:', ballInHand, 'ballState cue:', ballState?.find?.(b => b.label === 'cue'))
             const currentScene = gameRef.current?.scene?.scenes?.[0]
@@ -382,8 +389,16 @@ export default function GameCanvas({ gameState, onGameOver }) {
       )
 
       if (!moving && !shotFired) setMyTurn(!!rawTurn)
-      if (gameState?.mode === 'online') setWaitingForOpponent(!rawTurn)
+      if (gameState?.mode === 'online' && !result) setWaitingForOpponent(!rawTurn)
 
+      // Pick up game-over result pushed by the socket handler (opponent's perspective)
+      if (!result) {
+        const registryResult = scene.registry.get('gameResult')
+        if (registryResult === 'win' || registryResult === 'loss') {
+          setWaitingForOpponent(false)
+          setResult(registryResult)
+        }
+      }
       setFoul(!!scene.registry.get('foul'))
       const type = scene.registry.get('myType')
       if (type) setMyType(type)
@@ -424,7 +439,10 @@ export default function GameCanvas({ gameState, onGameOver }) {
     return () => {
       clearInterval(syncInterval)
       if (gameState?.mode === 'online') {
-        import('../socket/client').then(({ setOnTurnDone }) => setOnTurnDone(null))
+        import('../socket/client').then(({ setOnTurnDone, setOnGameOver }) => {
+          setOnTurnDone(null)
+          setOnGameOver(null)
+        })
       }
       destroyEngine(gameRef.current)
     }

@@ -452,10 +452,11 @@ function sceneUpdate() {
     this.registry.set('shotFired',       false)
 
     const pending = this.registry.get('pendingResult')
+    // AFTER:
     if (pending) {
       this.registry.set('pendingResult', null)
       this.registry.set('gameResult', pending)
-      if (onGameOverCb) onGameOverCb(pending)
+      notifyGameOver(this, pending)
       return
     }
 
@@ -598,10 +599,10 @@ function handleTurnEnd(scene) {
 
   console.log('[turnEnd] firstContactMade:', firstContactMade, 'scratched:', scratched, 'breakDone:', scene.registry.get('breakDone'), 'objectBalls:', objectBalls.length)
 
-  // ── Break guard — skip ALL type assignment and foul logic for the opening shot ──
+  // ── Break guard — skip foul logic for the opening shot, but DO assign types ──
   const breakDone = scene.registry.get('breakDone')
   if (!breakDone) {
-    scene.registry.set('breakDone', true)   // only blocks the ONE opening break turn-end
+    scene.registry.set('breakDone', true)
     if (scratched) {
       switchTurn(scene)
       handleFoulBallInHand()
@@ -609,11 +610,12 @@ function handleTurnEnd(scene) {
       switchTurn(scene)
       notify(scene, { switched: true, foul: false })
     } else {
-      // Pocketed on break — keep turn, no type assigned yet
+      // Balls pocketed on break — keep turn, table is still open, no type assigned
       notify(scene, { switched: false, foul: false })
     }
     return
   }
+  // ── end break guard ──
   // ── end break guard ──
 
   if (scratched) {
@@ -769,6 +771,24 @@ function notify(scene, payload) {
       oppType: engineOppType,
     })
   }
+}
+
+// Called by handleTurnEnd/handlePocket when a game-over result is resolved in online mode
+function notifyGameOver(scene, result) {
+  const mode       = scene.registry.get('mode')
+  const gameId     = scene.registry.get('gameId')
+  const userId     = scene.registry.get('userId')
+  const myTurnNow  = !!scene.registry.get('myTurn')
+
+  if (mode === 'online' && gameId && userId) {
+    // result is from local player's perspective: 'win' | 'loss'
+    const winnerId = result === 'win' ? userId : scene.registry.get('opponentId')
+    import('../socket/client').then(({ sendGameOver }) => {
+      sendGameOver(gameId, winnerId)
+    })
+  }
+
+  if (onGameOverCb) onGameOverCb(result)
 }
 
 // ---------------------------------------------------------------------------
