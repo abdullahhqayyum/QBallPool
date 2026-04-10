@@ -5,11 +5,13 @@ import { setupCue, resetCue, shootCue, predictCueFirstContact, clientToGame } fr
 import { TABLE, BALL, POCKET } from './constants'
 import { useGameStore } from '../store/gameStore'
 import { triggerAIShot, triggerAIPlacement } from './ai'
+import { remoteTargets } from '../socket/client'
 
 
 let onGameOverCb = null
 let onTurnEndCb  = null
 let onPocketCb   = null
+let _lastPositionBroadcast = 0
 
 // ---------------------------------------------------------------------------
 // Scale helpers — game always runs at TABLE.width × TABLE.height internally.
@@ -352,6 +354,19 @@ function sceneUpdate() {
   // Don't run physics or logic while rewind animation is playing
   if (this._rewindPlaying) return
 
+  // Interpolate remote ball positions when spectating opponent's turn
+  // Interpolate remote ball positions when spectating opponent's turn
+  if (this.registry.get('mode') === 'online' && !this.registry.get('myTurn')) {
+    const sceneBalls = this.registry.get('balls') || []
+    sceneBalls.forEach(ball => {
+      if (ball.pocketed) return
+      const t = remoteTargets[ball.label]
+      if (!t) return
+      ball.x += (t.x - ball.x) * 0.18
+      ball.y += (t.y - ball.y) * 0.18
+      if (ball.gfx) ball.gfx.setPosition(ball.x, ball.y)
+    })
+  }
   // Record frame if a shot is in progress
   recordFrame(this)
 
@@ -469,6 +484,24 @@ function sceneUpdate() {
     this._stillFrameCount = 0
     this.registry.set('ballsWereMoving', true)
 
+    // Stream positions to opponent in online mode (~20fps)
+    const mode = this.registry.get('mode')
+    if (mode === 'online' && this.registry.get('myTurn')) {
+      const now = Date.now()
+      if (now - _lastPositionBroadcast > 50) {
+        _lastPositionBroadcast = now
+        const balls = this.registry.get('balls') || []
+        const positions = balls.map(b => ({
+          label:    b.label,
+          x:        b.x,
+          y:        b.y,
+          pocketed: b.pocketed,
+        }))
+        import('../socket/client').then(({ sendBallPositions }) => {
+          sendBallPositions(positions)
+        })
+      }
+    }
     // Open cheat window once balls are moving (only if not yet used)
     const isMyTurnForCheat = this.registry.get('myTurn')
     const modeForCheat = this.registry.get('mode')

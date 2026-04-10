@@ -339,15 +339,23 @@ export default function GameCanvas({ gameState, onGameOver }) {
                     const balls   = currentScene.registry.get('balls') || []
                     const cueBall = balls.find(b => b.label === 'cue')
                     if (cueBall) {
-                      cueBall.pocketed = false
-                      cueBall.vx = 0
-                      cueBall.vy = 0
+                      cueBall.pocketed  = false
+                      cueBall.vx        = 0
+                      cueBall.vy        = 0
+                      cueBall._placing  = false   // ← prevents drag hijack
                       if (cueBall.gfx) {
                         cueBall.gfx.setPosition(cueBall.x, cueBall.y)
                         cueBall.gfx.setVisible(true)
                         cueBall.gfx.setAlpha(1)
                       }
                     }
+                  }
+
+                  // Ensure no placement mode is active on the spectating client
+                  currentScene.registry.set('placingCueBall', false)
+                  if (typeof currentScene._cueBallPlacementCleanup === 'function') {
+                    currentScene._cueBallPlacementCleanup()
+                    currentScene._cueBallPlacementCleanup = null
                   }
                 })
               }
@@ -601,19 +609,19 @@ export default function GameCanvas({ gameState, onGameOver }) {
 
         {waitingForOpponent && (
           <div style={{
-            position:       'absolute', inset: 0,
-            background:     'rgba(0,0,0,0.6)',
-            display:        'flex', flexDirection: 'column',
-            alignItems:     'center', justifyContent: 'center',
-            zIndex:         50, pointerEvents: 'none',
+            position:      'absolute', top: 8, left: '50%',
+            transform:     'translateX(-50%)',
+            background:    'rgba(0,0,0,0.72)',
+            border:        '1px solid #333',
+            borderRadius:  8,
+            padding:       '6px 16px',
+            zIndex:        50,
+            pointerEvents: 'none',
+            whiteSpace:    'nowrap',
           }}>
-            <div style={{ fontSize: 14, color: '#fff', fontFamily: 'monospace', textAlign: 'center' }}>
-              <div style={{ marginBottom: 8, fontSize: 24 }}>⏳</div>
-              Waiting for opponent's turn…
-              <div style={{ fontSize: 11, color: '#aaa', marginTop: 6 }}>
-                You can close the app — we'll notify you when it's your turn
-              </div>
-            </div>
+            <span style={{ fontSize: 12, color: '#aaa', fontFamily: 'monospace' }}>
+              ⏳ Opponent's turn…
+            </span>
           </div>
         )}
 

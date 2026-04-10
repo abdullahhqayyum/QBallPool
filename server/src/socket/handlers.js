@@ -129,6 +129,13 @@ function registerHandlers(io, socket) {
     }
   })
 
+  // Relay live ball positions to the other player (no server-side logic)
+  socket.on('ball_positions', ({ positions }) => {
+    const roomId = socket.data.roomId
+    if (!roomId) return
+    socket.to(roomId).emit('ball_positions', { positions })
+  })
+
   socket.on('game_over', async ({ gameId, winnerId }) => {
     const roomId = socket.data.roomId
     if (!roomId) return

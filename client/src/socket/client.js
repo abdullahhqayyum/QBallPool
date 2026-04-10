@@ -25,6 +25,10 @@ export function sendTurnComplete(gameId, ballState, nextTurnPlayerId, ballInHand
   socket.emit('turn_complete', { gameId, ballState, nextTurnPlayerId, ballInHand })
 }
 
+export function sendBallPositions(positions) {
+  if (socket.connected) socket.emit('ball_positions', { positions })
+}
+
 export function sendGameOver(gameId, winnerId) {
   socket.emit('game_over', { gameId, winnerId })
 }
@@ -35,10 +39,36 @@ socket.on('turn_done', ({ nextTurnPlayerId, ballState, ballInHand }) => {
   const userId = _scene.registry.get('userId')
   const isMyTurn = nextTurnPlayerId === userId
   console.log('[turn_done received] isMyTurn:', isMyTurn, 'ballInHand:', ballInHand)
+  // Clear interpolation targets — turn_done gives us authoritative positions
+  Object.keys(remoteTargets).forEach(k => delete remoteTargets[k])
   _scene.registry.set('myTurn', isMyTurn)
   if (_onTurnDone) {
     _onTurnDone(ballState, isMyTurn, ballInHand)
   }
+})
+
+// Target positions for smooth interpolation — keyed by ball label
+// Target positions for smooth interpolation — keyed by ball label
+export const remoteTargets = {}
+
+socket.on('ball_positions', ({ positions }) => {
+  if (!_scene) return
+  if (_scene.registry.get('myTurn')) return
+
+  positions.forEach(({ label, x, y, pocketed }) => {
+    if (pocketed) {
+      const balls = _scene.registry.get('balls') || []
+      const ball  = balls.find(b => b.label === label)
+      if (ball && !ball.pocketed) {
+        ball.pocketed = true
+        ball.x = x
+        ball.y = y
+        if (ball.gfx) ball.gfx.setVisible(false)
+      }
+    } else {
+      remoteTargets[label] = { x, y }
+    }
+  })
 })
 
 socket.on('opponent_disconnected', ({ message }) => {
