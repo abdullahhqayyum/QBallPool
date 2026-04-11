@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
+import Auth from './Auth'
 import socket from '../socket/client.js'
 
 const FORMSPREE_ID = 'mkopqpvq'
@@ -11,7 +12,7 @@ const CARD     = '#ffffff'
 const TEXT     = '#111111'
 const MUTED    = '#888'
 
-export default function Lobby({ onStart, user }) {
+export default function Lobby({ onStart, user, onLogin, onLogout }) {
   const [mode,          setMode]          = useState('offline')
   const [onlineRole,    setOnlineRole]    = useState(null)      // 'host' | 'guest'
   const [joinCode,      setJoinCode]      = useState('')        // guest types this
@@ -23,6 +24,8 @@ export default function Lobby({ onStart, user }) {
   const [feedbackEmail, setFeedbackEmail] = useState('')
   const [feedbackMsg,   setFeedbackMsg]   = useState('')
   const [feedbackStatus,setFeedbackStatus]= useState(null)
+  const [authOpen, setAuthOpen] = useState(false)
+
 
   // FIX 1: stable userId — computed once per mount, not on every click.
   // Previously `guest-${Date.now()}` was called inside handleGuestJoin, so every
@@ -67,18 +70,21 @@ export default function Lobby({ onStart, user }) {
     function doEmit() {
       socket.off('game_start')
 
-      socket.once('game_start', ({ player1_id, player2_id, current_turn, ballState }) => {
+      socket.once('game_start', ({ player1_id, player2_id, current_turn, ballState, gameId }) => {
+        // On rejoin, the server knows who P1 is. Guest must be the other player.
+        const resolvedUserId = player1_id === userId ? userId : player2_id
+
         onStart({
           mode: 'online',
           game: {
-            id:           code,
+            id:           gameId || code,
             player1_id,
             player2_id,
             current_turn,
             ball_state:   ballState ?? null,
             my_type:      null,
           },
-          user: { ...(user || {}), id: userId, isGuest: !user?.id },
+          user: { ...(user || {}), id: resolvedUserId, isGuest: !user?.id },
         })
       })
 
@@ -120,19 +126,24 @@ export default function Lobby({ onStart, user }) {
         alert(message)
       })
 
-      socket.once('game_start', ({ player1_id, player2_id, current_turn, ballState }) => {
+      socket.once('game_start', ({ player1_id, player2_id, current_turn, ballState, gameId }) => {
         console.log('[Guest] game_start received!')
+        // On rejoin, the server knows who P1 is. Guest must be the other player.
+        const resolvedUserId = player1_id === userId ? userId : player2_id
+        // Translate current_turn from the DB's ephemeral guest id to our resolved id
+        const resolvedTurn = (current_turn === player1_id) ? player1_id : resolvedUserId
+
         onStart({
           mode: 'online',
           game: {
-            id:           code,
+            id:           gameId || code,
             player1_id,
-            player2_id,
-            current_turn,
+            player2_id:   resolvedUserId,
+            current_turn: resolvedTurn,
             ball_state:   ballState ?? null,
             my_type:      null,
           },
-          user: { ...(user || {}), id: userId, isGuest: !user?.id },
+          user: { ...(user || {}), id: resolvedUserId, isGuest: !user?.id },
         })
       })
 
@@ -224,7 +235,47 @@ export default function Lobby({ onStart, user }) {
       <div style={{ position: 'relative', zIndex: 1, maxWidth: 480, margin: '0 auto', padding: '0 24px 80px' }}>
 
         {/* ── Hero ── */}
-        <div style={{ paddingTop: 72, paddingBottom: 16, textAlign: 'center' }}>
+        <div style={{ paddingTop: 72, paddingBottom: 16, textAlign: 'center', position: 'relative' }}>
+
+          {/* Login button — top right */}
+          <div style={{ position: 'absolute', top: 16, right: 0 }}>
+            {user?.isGuest ? (
+              <button
+                onClick={() => setAuthOpen(o => !o)}
+                style={{
+                  background: authOpen ? TEXT : 'transparent',
+                  color:      authOpen ? BG : MUTED,
+                  border:     `1.5px solid ${authOpen ? TEXT : '#e0ddd6'}`,
+                  borderRadius: 20, padding: '6px 14px',
+                  fontSize: 12, fontWeight: 700, fontFamily: 'inherit',
+                  cursor: 'pointer', transition: 'all 0.15s',
+                }}
+              >
+                {authOpen ? 'Cancel' : 'Log in'}
+              </button>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{
+                  background: ACCENT, color: TEXT,
+                  borderRadius: 20, padding: '5px 12px',
+                  fontSize: 12, fontWeight: 800,
+                }}>
+                  {user?.user_metadata?.username || user?.email?.split('@')[0] || 'Player'}
+                </span>
+                <button
+                  onClick={() => { onLogout?.(); setAuthOpen(false) }}
+                  style={{
+                    background: 'transparent', border: '1.5px solid #e0ddd6',
+                    borderRadius: 20, padding: '5px 12px',
+                    fontSize: 11, fontWeight: 600, color: MUTED,
+                    fontFamily: 'inherit', cursor: 'pointer',
+                  }}
+                >
+                  Sign out
+                </button>
+              </div>
+            )}
+          </div>
 
           {/* Ball cluster */}
           <div style={{ position: 'relative', width: 100, height: 100, margin: '0 auto 28px' }}>
@@ -260,9 +311,41 @@ export default function Lobby({ onStart, user }) {
           }}>
             BETA
           </div>
-          <p style={{ color: MUTED, fontSize: 15, margin: '0 0 40px', lineHeight: 1.6 }}>
+          <p style={{ color: MUTED, fontSize: 15, margin: '0 0 24px', lineHeight: 1.6 }}>
             Q-ball pool in your browser.<br/>No download. No account.
           </p>
+
+          {/* ── Inline auth panel ── */}
+          {authOpen && user?.isGuest && (
+            <div style={{
+              background: CARD, border: '1.5px solid #e0ddd6',
+              borderRadius: 20, padding: '4px 0 8px', marginBottom: 16,
+              textAlign: 'left',
+            }}>
+              <Auth
+                onAuth={(authedUser) => {
+                  onLogin?.(authedUser)
+                  setAuthOpen(false)
+                }}
+                onGuest={() => setAuthOpen(false)}
+              />
+            </div>
+          )}
+
+          {/* ── My Games banner (logged-in users) ── */}
+          {!user?.isGuest && (
+            <div style={{
+              background: ACCENT + '22', border: `1.5px solid ${ACCENT}`,
+              borderRadius: 14, padding: '12px 16px',
+              marginBottom: 16, display: 'flex',
+              justifyContent: 'space-between', alignItems: 'center',
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>
+                🎱 Welcome back! Your ongoing games are below.
+              </div>
+            </div>
+          )}
+
         </div>
 
         {/* ── Mode selector ── */}
@@ -667,7 +750,7 @@ export default function Lobby({ onStart, user }) {
               📲 iPhone tip: Share → Add to Home Screen for fullscreen
             </div>
           )}
-          <div>guest · {user?.id?.slice(0, 14)}</div>
+        <div>{user?.isGuest ? `guest · ${user?.id?.slice(0, 14)}` : `logged in as ${user?.user_metadata?.username || user?.email?.split('@')[0]}`}</div>
         </div>
 
       </div>

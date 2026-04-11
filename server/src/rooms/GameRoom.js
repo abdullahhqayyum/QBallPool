@@ -30,6 +30,10 @@ class GameRoom {
     this.currentTurn = other ? other.playerId : null
   }
 
+  finish() {
+    this.state = 'finished'
+  }
+
   isReady()  { return this.players.length === 2 }
   isEmpty()  { return this.players.length === 0 }
 }

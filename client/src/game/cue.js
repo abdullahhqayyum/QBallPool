@@ -747,11 +747,11 @@ function isIllegalTarget(scene, hit) {
   // Type assigned to the current shooter
   const shooterType = myTurn ? myType : oppType
 
-  if (hit.type === '8ball') {
+    if (hit.type === '8ball') {
     // 8-ball is legal only if the current shooter has cleared all their balls
     const balls        = scene.registry.get('balls') || []
     const shooterBalls = balls.filter(b => b.type === shooterType)
-    const allCleared   = shooterBalls.length > 0 && shooterBalls.every(b => b.pocketed)
+    const allCleared   = shooterBalls.length === 0 || shooterBalls.every(b => b.pocketed)
     return !allCleared
   }
 

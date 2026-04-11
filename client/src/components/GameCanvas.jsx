@@ -5,6 +5,9 @@ import MatchResult from './MatchResult'
 import PocketCallModal from './PocketCallModal'
 import { setSpin, getSpin } from '../game/cue'
 
+const isUuid = v => typeof v === 'string' &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v)
+
 function Confetti({ active }) {
   const canvasRef = useRef(null)
   const animRef   = useRef(null)
@@ -236,6 +239,7 @@ export default function GameCanvas({ gameState, onGameOver }) {
       'game-container',
       gameState,
       (outcome) => {
+        console.log('[onGameOver callback] outcome:', outcome, 'mode:', gameState?.mode)
         // In offline 2P, `outcome` is always from Player 1's perspective.
         // Translate to an absolute winner so the shared screen shows who won.
         if (gameState?.mode === 'offline') {
@@ -296,6 +300,7 @@ export default function GameCanvas({ gameState, onGameOver }) {
     if (gameState?.mode === 'online') {
       // Rematch notifier ref
       const _notifyOpponentWantsRematch = _notifyOpponentWantsRematchRef?.current
+      let _visibilityHandler = null
       const initOnline = () => {
         import('../socket/client').then(({ setScene, setOnTurnDone, joinRoom }) => {
           const scene = gameRef.current?.scene?.scenes?.[0]
@@ -305,6 +310,31 @@ export default function GameCanvas({ gameState, onGameOver }) {
             return
           }
           setScene(scene)
+          setOpponentDisconnected(false)
+
+          // Install a visibility handler to pause/resume Phaser when the tab is hidden
+          _visibilityHandler = () => {
+            const game = gameRef.current
+            if (!game) return
+            try {
+              if (document.hidden) {
+                if (game.scene && typeof game.scene.pause === 'function') game.scene.pause()
+                else if (game.loop && typeof game.loop.sleep === 'function') game.loop.sleep()
+              } else {
+                if (game.scene && typeof game.scene.resume === 'function') game.scene.resume()
+                else if (game.loop && typeof game.loop.wake === 'function') game.loop.wake()
+                // Re-sync turn state from registry in case we missed events while hidden
+                const scene = game.scene.scenes?.[0]
+                if (scene) {
+                  setMyTurn(!!scene.registry.get('myTurn'))
+                  setWaitingForOpponent(!scene.registry.get('myTurn'))
+                }
+              }
+            } catch (e) {
+              // ignore
+            }
+          }
+          document.addEventListener('visibilitychange', _visibilityHandler)
 
           const userId    = gameState.user.id
           const p1        = gameState.game.player1_id
@@ -388,44 +418,61 @@ export default function GameCanvas({ gameState, onGameOver }) {
           })
 
           setWaitingForOpponent(!myTurnNow)
-          joinRoom(gameState.game.id, gameState.user.id, gameState.game.id)
+          // resumeGame was already called from LobbyPage before navigation.
+          // Only call joinRoom for brand-new games (no DB game id yet, or id is a room code).
+          // Real DB games use UUIDs; lobby-created rooms use short codes.
+          const gameIdIsUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+            .test(gameState.game?.id)
+          if (!gameIdIsUuid) {
+            joinRoom(gameState.game.id, gameState.user.id, gameState.game.id)
+          }
           import('../socket/client').then(({ setOnRematchRequested, setOnRematchStart }) => {
             setOnRematchRequested(() => {
               if (_notifyOpponentWantsRematchRef.current) _notifyOpponentWantsRematchRef.current()
             })
-            setOnRematchStart(({ player1_id, player2_id, current_turn }) => {
-              const userId    = gameState.user.id
-              const myTurnNow = current_turn === userId
+            setOnRematchStart(({ player1_id, player2_id, current_turn, gameId }) => {
+              const userId = gameState.user.id
 
-              // Update gameState.game in place so the new engine gets correct player IDs
+              // For guests, our identity might have drifted — re-resolve it
+              const resolvedUserId = isUuid(userId)
+                ? userId
+                : (player1_id === userId ? player1_id : player2_id)
+
+              const myTurnNow = current_turn === resolvedUserId ||
+                (!isUuid(current_turn) && !isUuid(resolvedUserId))
+
+              gameState.user.id           = resolvedUserId
+              gameState.game.id           = gameId || gameState.game.id
               gameState.game.player1_id   = player1_id
               gameState.game.player2_id   = player2_id
               gameState.game.current_turn = current_turn
               gameState.game.ball_state   = null
               gameState.game.my_type      = null
 
-              // Destroy the current Phaser instance cleanly
+              // Destroy the current Phaser instance cleanly and only reset
+              // React state after the engine is fully destroyed to avoid
+              // the race where useEffect re-runs before gameRef is nulled.
               import('../game/engine').then(({ destroyEngine }) => {
                 destroyEngine(gameRef.current)
                 gameRef.current = null
+
+                // Reset all React state after engine is cleanly destroyed
+                setResult(null)
+                setWaitingForOpponent(!myTurnNow)
+                setMyTurn(myTurnNow)
+                setMyType(null)
+                setPocketed([])
+                setFoul(false)
+                setCalledPocket(null)
+                setNeedsPocketCall(false)
+                setPlacingCueBall(false)
+                setCheatUsed(false)
+                setCheatAvailable(false)
+
+                // Bump engineKey — this remounts the game container div and
+                // triggers a new initEngine call via the useEffect
+                setEngineKey(k => k + 1)
               })
-
-              // Reset all React state
-              setResult(null)
-              setWaitingForOpponent(!myTurnNow)
-              setMyTurn(myTurnNow)
-              setMyType(null)
-              setPocketed([])
-              setFoul(false)
-              setCalledPocket(null)
-              setNeedsPocketCall(false)
-              setPlacingCueBall(false)
-              setCheatUsed(false)
-              setCheatAvailable(false)
-
-              // Bump engineKey — this remounts the game container div and
-              // triggers a new initEngine call via the useEffect
-              setEngineKey(k => k + 1)
             })
           })
         })
@@ -474,7 +521,9 @@ export default function GameCanvas({ gameState, onGameOver }) {
       const isMyActiveMode = gameState?.mode === 'offline' || !!scene.registry.get('myTurn')
       setCheatAvailable(!!scene.registry.get('cheatAvailable') && !scene.registry.get('cheatUsed') && isMyActiveMode)
       setCheatUsed(!!scene.registry.get('cheatUsed'))
-      if (scene.registry.get('opponentDisconnected')) setOpponentDisconnected(true)
+      const disconnected = scene.registry.get('opponentDisconnected')
+      if (disconnected === false) setOpponentDisconnected(false)
+      else if (disconnected === true) setOpponentDisconnected(true)
 
       const pocketedLabels = (scene.registry.get('balls') || [])
         .filter(b => b?.pocketed).map(b => b.label)
@@ -488,7 +537,7 @@ export default function GameCanvas({ gameState, onGameOver }) {
       // Check if the CURRENT shooter's balls are all done
       const shooterType = isMine ? mt : oppType
       const shooterBalls = shooterType ? allBalls.filter(b => b.type === shooterType) : []
-      const allDone      = shooterBalls.length > 0 && shooterBalls.every(b => b.pocketed)
+      const allDone      = shooterType && (shooterBalls.length === 0 || shooterBalls.every(b => b.pocketed))
       const eightLeft    = allBalls.some(b => b.type === '8ball' && !b.pocketed)
       const alreadyCalled = scene.registry.get('calledPocket') !== null &&
                             scene.registry.get('calledPocket') !== undefined
@@ -505,6 +554,7 @@ export default function GameCanvas({ gameState, onGameOver }) {
 
     return () => {
       clearInterval(syncInterval)
+      try { if (typeof _visibilityHandler === 'function') document.removeEventListener('visibilitychange', _visibilityHandler) } catch (e) {}
       if (gameState?.mode === 'online') {
         import('../socket/client').then(({ setOnTurnDone, setOnGameOver, setOnRematchRequested, setOnRematchStart }) => {
           setOnTurnDone(null)

@@ -39,7 +39,14 @@ function makeGuest() {
 export default function App() {
   const navigate  = useNavigate()
   const location  = useLocation()
-  const [user,      setUser]      = useState(makeGuest)
+  const [user, setUser] = useState(makeGuest)
+  function handleLogin(authedUser) {
+    setUser(authedUser)
+  }
+
+  function handleLogout() {
+    setUser(makeGuest())
+  }
   const [gameState, setGameState] = useState(null)
 
   const isGame = location.pathname === '/game'
@@ -62,13 +69,40 @@ export default function App() {
 
   function handleStart(state) {
     setGameState(state?.user ? state : { ...state, user })
-    navigate('/game')
+    navigate('/game' + window.location.search)
   }
 
   function handleGameOver() {
     setUser(makeGuest())
     setGameState(null)
     navigate('/home')
+  }
+
+  async function handleJoinGame(savedGame) {
+    console.log('[App handleJoinGame] savedGame.ball_state:', !!savedGame.ball_state)
+
+    // Fetch fresh game state from DB — the cached row may be stale
+    let freshGame = savedGame
+    try {
+      const { data, error } = await import('./lib/supabase').then(({ default: supabase }) =>
+        supabase.from('games').select('*').eq('id', savedGame.id).single()
+      )
+      if (!error && data) freshGame = data
+      console.log('[App handleJoinGame] freshGame.ball_state:', !!freshGame.ball_state)
+    } catch (e) {
+      console.warn('[App handleJoinGame] failed to fetch fresh game, using cached', e)
+    }
+
+    const myType = freshGame.player1_id === user.id
+      ? freshGame.player1_type
+      : freshGame.player2_type
+
+    setGameState({
+      mode: 'online',
+      game: { ...freshGame, my_type: myType },
+      user,
+    })
+    navigate('/game' + window.location.search)
   }
 
   return (
@@ -78,7 +112,15 @@ export default function App() {
 
       <Route
         path="/home"
-        element={<LobbyPage user={user} onStart={handleStart} />}
+        element={
+          <LobbyPage
+            user={user}
+            onStart={handleStart}
+            onLogin={handleLogin}
+            onLogout={handleLogout}
+            onJoinGame={handleJoinGame}
+          />
+        }
       />
 
       <Route
@@ -98,6 +140,9 @@ export default function App() {
 
 function RedirectToHome() {
   const navigate = useNavigate()
-  useEffect(() => { navigate('/home', { replace: true }) }, [])
+  const location = useLocation()
+  useEffect(() => {
+    navigate('/home' + location.search, { replace: true })
+  }, [])
   return null
 }

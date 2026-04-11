@@ -1,5 +1,6 @@
 import Phaser from 'phaser'
 import { createBalls, rehydrateBalls, syncBallGraphics, areBallsMoving, getBallState } from './balls'
+import { createEightOnlyBalls } from './eightOnlyBalls'
 import { stepPhysics, drawTable, checkPockets } from './physics'
 import { setupCue, resetCue, shootCue, predictCueFirstContact, clientToGame } from './cue'
 import { TABLE, BALL, POCKET } from './constants'
@@ -245,6 +246,9 @@ function _finishCheat(scene, onComplete) {
 // Scene create
 // ---------------------------------------------------------------------------
 function sceneCreate(gameState) {
+  console.log('[sceneCreate] mode:', gameState?.mode)
+  console.log('[sceneCreate] ball_state:', gameState?.game?.ball_state)
+  console.log('[sceneCreate] game.id:', gameState?.game?.id)
   drawTable(this)
 
   const isRejoin = !!gameState?.game?.ball_state
@@ -254,11 +258,15 @@ function sceneCreate(gameState) {
 
   if (isRejoin && game?.ball_state) {
     rehydrateBalls(this, game.ball_state)
+  } else if (typeof window !== 'undefined' && window.location?.search?.includes('eightonly=1')) {
+    createEightOnlyBalls(this)
   } else if (typeof window !== 'undefined' && window.location?.search?.includes('testrack=1')) {
     createTestRack(this)
   } else {
     createBalls(this)
   }
+
+  
 
   const myTurn = isOnline ? game?.current_turn === userId : true
 
@@ -290,17 +298,24 @@ function sceneCreate(gameState) {
   this._rewindPlaying   = false
   this.registry.set('pendingResult', null)
 
-  if (isRejoin && game?.my_type) {
-    this.registry.set('myType',  game.my_type)
-    this.registry.set('oppType', game.my_type === 'solid' ? 'stripe' : 'solid')
-  } else {
-    // Always clear types for a fresh game — prevents stale values if engine is reused
-    this.registry.set('myType',  null)
-    this.registry.set('oppType', null)
-    this.registry.set('breakDone', false)   // guarantee reset for new games
-  }
+if (isRejoin && game?.my_type) {
+  this.registry.set('myType',  game.my_type)
+  this.registry.set('oppType', game.my_type === 'solid' ? 'stripe' : 'solid')
+} else {
+  this.registry.set('myType',  null)
+  this.registry.set('oppType', null)
+  this.registry.set('breakDone', false)
+}
 
   // If ?testrack=1 is present, force types so pot/foul rules are active
+  // For eightonly test — assign types based on who the local player is
+  if (typeof window !== 'undefined' && window.location?.search?.includes('eightonly=1')) {
+    const isP1 = !isOnline || game?.player1_id === userId
+    this.registry.set('myType',    isP1 ? 'solid' : 'stripe')
+    this.registry.set('oppType',   isP1 ? 'stripe' : 'solid')
+    this.registry.set('breakDone', true)
+  }
+
   if (typeof window !== 'undefined' && window.location?.search?.includes('testrack=1')) {
     this.registry.set('myType',  'solid')
     this.registry.set('oppType', 'stripe')
@@ -416,12 +431,12 @@ function sceneUpdate() {
   if (shooterType && myTurn) {
     const shooterBalls  = allBalls.filter(b => b.type === shooterType)
     const eightBall     = allBalls.find(b => b.type === '8ball')
-    const allCleared    = shooterBalls.length > 0 && shooterBalls.every(b => b.pocketed)
+    const allCleared    = shooterType && (shooterBalls.length === 0 || shooterBalls.every(b => b.pocketed))
     const eightStillUp  = eightBall && !eightBall.pocketed
     const alreadyCalled = this.registry.get('calledPocket') !== null &&
                           this.registry.get('calledPocket') !== undefined
 
-    if (allCleared && eightStillUp && !alreadyCalled) {
+    if (myTurn && allCleared && eightStillUp && !alreadyCalled) {
       this.registry.set('selectingPocket', true)
       useGameStore.setSelectingPocket(true)
     }
@@ -469,6 +484,7 @@ function sceneUpdate() {
     const pending = this.registry.get('pendingResult')
     // AFTER:
     if (pending) {
+      console.log('[sceneUpdate] consuming pendingResult:', pending, 'myTurn:', this.registry.get('myTurn'))
       this.registry.set('pendingResult', null)
       this.registry.set('gameResult', pending)
       notifyGameOver(this, pending)
@@ -537,6 +553,7 @@ function sceneUpdate() {
 // Pocket handler
 // ---------------------------------------------------------------------------
 function handlePocket(scene, ball) {
+  console.log('[handlePocket] ball:', ball.type, 'existingPendingResult:', scene.registry.get('pendingResult'))
   if (scene.registry.get('gameResult')) return
 
   const pocketedThisTurn = scene.registry.get('pocketedThisTurn') || []
@@ -551,6 +568,23 @@ function handlePocket(scene, ball) {
     const balls   = scene.registry.get('balls') || []
     const myTurn  = scene.registry.get('myTurn')   // true = player1's turn
     const oppType = myType === 'solid' ? 'stripe' : 'solid'
+    // Diagnostic logs requested by user: print key 8-ball conditions early
+    try {
+      const _calledPocket    = scene.registry.get('calledPocket')
+      const _shooterType     = myTurn ? myType : oppType
+      const _shooterBalls    = balls.filter(b => b.type === _shooterType)
+      const _allCleared      = _shooterBalls.length === 0 || _shooterBalls.every(b => b.pocketed)
+      const _actualPocketIdx = POCKET.positions.reduce((best, [px, py], i) => {
+        const d = Math.hypot(ball.x - px, ball.y - py)
+        return d < best.d ? { i, d } : best
+      }, { i: -1, d: Infinity }).i
+      console.log('[8ball] myTurn:', myTurn, 'myType:', myType, 'shooterType:', _shooterType)
+      console.log('[8ball] allCleared:', _allCleared, 'shooterBalls:', _shooterBalls.length)
+      console.log('[8ball] calledPocket:', _calledPocket, 'actualPocket:', _actualPocketIdx)
+      console.log('[8ball] ball position:', Math.round(ball.x), Math.round(ball.y))
+    } catch (e) {
+      console.warn('[8ball] diagnostic log failed', e)
+    }
 
     if (!myType) {
       // 8-ball potted before types assigned — shooter always loses
@@ -563,10 +597,14 @@ function handlePocket(scene, ball) {
       return d < best.d ? { i, d } : best
     }, { i: -1, d: Infinity }).i
 
+    const calledPocket = scene.registry.get('calledPocket')
+    console.log('[8ball pocketed] calledPocket:', calledPocket, 'actualPocket:', actualPocketIdx, 'ball pos:', Math.round(ball.x), Math.round(ball.y))
+    console.log('[8ball pocketed] pocket positions:', POCKET.positions.map(([x,y],i) => `${i}:(${Math.round(x)},${Math.round(y)})`).join(' '))
+
     const shooterType  = myTurn ? myType : oppType
     const shooterBalls = balls.filter(b => b.type === shooterType)
     // A ball pocketed this same turn counts as cleared — check ALL of that type
-    const allCleared   = shooterBalls.length > 0 && shooterBalls.every(b => b.pocketed)
+    const allCleared   = shooterBalls.length === 0 || shooterBalls.every(b => b.pocketed)
 
     if (!allCleared) {
       // Shooter potted 8-ball too early — shooter loses
@@ -574,7 +612,6 @@ function handlePocket(scene, ball) {
       return
     }
 
-    const calledPocket = scene.registry.get('calledPocket')
     if (calledPocket === null || calledPocket === undefined) {
       // No pocket was called — shooter loses
       scene.registry.set('pendingResult', myTurn ? 'loss' : 'win')
@@ -583,8 +620,9 @@ function handlePocket(scene, ball) {
 
     // Correct pocket called and potted — shooter wins; wrong pocket — shooter loses
     const shooterWins = actualPocketIdx === calledPocket
+    console.log('[8ball result] shooterWins:', shooterWins, 'myTurn:', myTurn, 'pendingResult will be:', myTurn ? (shooterWins ? 'win' : 'loss') : (shooterWins ? 'loss' : 'win'))
     // pendingResult is ALWAYS from player1's perspective (myTurn=true means p1 shot)
-    scene.registry.set('pendingResult', 
+    scene.registry.set('pendingResult',
       myTurn
         ? (shooterWins ? 'win' : 'loss')
         : (shooterWins ? 'loss' : 'win')   // p2 won means p1 lost
@@ -639,40 +677,62 @@ function handleTurnEnd(scene) {
     if (scratched) {
       switchTurn(scene)
       handleFoulBallInHand()
-    } else if (objectBalls.length === 0) {
+      return
+    }
+    
+    if (objectBalls.length === 0) {
       switchTurn(scene)
       notify(scene, { switched: true, foul: false })
-    } else {
-      // Balls pocketed on break — keep turn, table is still open, no type assigned
-      notify(scene, { switched: false, foul: false })
+      return
     }
-    return
-  }
-  // ── end break guard ──
-  // ── end break guard ──
 
-  if (scratched) {
-    scene.registry.set('foul', true)
-    switchTurn(scene)
-    handleFoulBallInHand()
-    return
-  }
+    // Balls pocketed on break — assign type immediately, keep turn
+    const hasSolid  = objectBalls.some(b => b.type === 'solid')
+    const hasStripe = objectBalls.some(b => b.type === 'stripe')
+    let assignedType = null
 
-  // Foul: cue ball didn't contact anything at all
-  if (!firstContactMade) {
-    scene.registry.set('foul', true)
-    switchTurn(scene)
-    handleFoulBallInHand()
-    return
-  }
+    if (hasSolid && !hasStripe) {
+      assignedType = 'solid'
+    } else if (hasStripe && !hasSolid) {
+      assignedType = 'stripe'
+    } else if (hasSolid && hasStripe) {
+      // Mixed — assign based on first ball pocketed
+      assignedType = objectBalls[0].type
+    }
 
-  // Foul: no ball pocketed and no rail hit after contact
-  if (!railHitAfterContact && objectBalls.length === 0) {
-    scene.registry.set('foul', true)
-    switchTurn(scene)
-    handleFoulBallInHand()
+    if (assignedType) {
+      scene.registry.set('myType',  assignedType)
+      scene.registry.set('oppType', assignedType === 'solid' ? 'stripe' : 'solid')
+    }
+
+    notify(scene, { switched: false, foul: false, assignedType })
     return
   }
+    // ── end break guard ──
+    // ── end break guard ──
+
+    if (scratched) {
+      scene.registry.set('foul', true)
+      switchTurn(scene)
+      handleFoulBallInHand()
+      return
+    }
+
+    // Foul: cue ball didn't contact anything at all
+    if (!firstContactMade) {
+      scene.registry.set('foul', true)
+      switchTurn(scene)
+      handleFoulBallInHand()
+      return
+    }
+
+    // Foul: no ball pocketed and no rail hit after contact
+    if (!railHitAfterContact && objectBalls.length === 0) {
+      scene.registry.set('foul', true)
+      switchTurn(scene)
+      handleFoulBallInHand()
+      return
+    }
 
   scene.registry.set('foul', false)
 
@@ -686,21 +746,22 @@ function handleTurnEnd(scene) {
     // frame and was removed from the active list), do NOT treat it as an
     // automatic foul — fall through to normal resolution instead.
     if (firstType) {
-      let firstContactFoul = false
-      if (firstType === '8ball') {
-        const shooterBalls = balls.filter(b => b.type === expectedType)
-        firstContactFoul   = !shooterBalls.every(b => b.pocketed)
-      } else if (firstType !== expectedType) {
-        firstContactFoul = true
-      }
+  let firstContactFoul = false
+  if (firstType === '8ball') {
+    const shooterBalls = balls.filter(b => b.type === expectedType)
+    // Only foul if shooter still has balls left — if none exist, 8-ball is legal
+    firstContactFoul = shooterBalls.length > 0 && !shooterBalls.every(b => b.pocketed)
+  } else if (firstType !== expectedType) {
+    firstContactFoul = true
+  }
 
-      if (firstContactFoul) {
-        scene.registry.set('foul', true)
-        switchTurn(scene)
-        handleFoulBallInHand()
-        return
-      }
-    }
+  if (firstContactFoul) {
+    scene.registry.set('foul', true)
+    switchTurn(scene)
+    handleFoulBallInHand()
+    return
+  }
+}
   }
 
   if (objectBalls.length === 0) {
@@ -817,6 +878,7 @@ function notify(scene, payload) {
 
 // Called by handleTurnEnd/handlePocket when a game-over result is resolved in online mode
 function notifyGameOver(scene, result) {
+  console.log('[notifyGameOver] result:', result, 'userId:', scene.registry.get('userId'))
   const mode       = scene.registry.get('mode')
   const gameId     = scene.registry.get('gameId')
   const userId     = scene.registry.get('userId')

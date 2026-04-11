@@ -6,41 +6,47 @@ export default function GameList({ user, onJoinGame, onNewGame }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetchGames()
-  }, [])
+    if (user?.id && !user.isGuest) fetchGames()
+  }, [user?.id])
 
   async function fetchGames() {
-    setLoading(true)
-    const { data, error } = await supabase
-      .from('games')
-      .select('*, player1:player1_id(username), player2:player2_id(username)')
-      .or(`player1_id.eq.${user.id},player2_id.eq.${user.id}`)
-      .order('updated_at', { ascending: false })
-    if (!error) setGames(data)
-    setLoading(false)
+  setLoading(true)
+  const { data, error } = await supabase
+    .from('games')
+    .select('*')
+    .or(`player1_id.eq.${user.id},player2_id.eq.${user.id}`)
+    .order('updated_at', { ascending: false })
+
+  console.log('fetchGames data:', data, 'error:', error)
+
+  if (!error && data?.length) {
+    // Collect all unique opponent IDs
+    const opponentIds = [...new Set(
+      data.map(g => g.player1_id === user.id ? g.player2_id : g.player1_id).filter(Boolean)
+    )]
+
+    // Fetch their usernames from profiles table
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, username')
+      .in('id', opponentIds)
+
+    const profileMap = Object.fromEntries((profiles || []).map(p => [p.id, p]))
+
+    // Attach player1/player2 objects manually
+    const enriched = data.map(g => ({
+      ...g,
+      player1: profileMap[g.player1_id] || null,
+      player2: profileMap[g.player2_id] || null,
+    }))
+    setGames(enriched)
+  } else if (!error) {
+    setGames([])
   }
+  setLoading(false)
+}
 
-  async function handleJoinGame(game) {
-    const { data, error } = await supabase
-      .from('games')
-      .select('*')
-      .eq('id', game.id)
-      .single()
-
-    if (error) {
-      console.error(error)
-      return
-    }
-
-    const myType = data.player1_id === user.id
-      ? data.player1_type
-      : data.player2_type
-
-    onJoinGame({
-      ...data,
-      my_type: myType,
-    })
-  }
+  // Use the parent `onJoinGame` handler to open a saved game
 
   const active    = games.filter(g => g.status === 'active')
   const completed = games.filter(g => g.status === 'completed')
@@ -75,7 +81,7 @@ export default function GameList({ user, onJoinGame, onNewGame }) {
           {active.map(game => (
             <div
               key={game.id}
-              onClick={() => handleJoinGame(game)}
+              onClick={() => onJoinGame(game)}
               style={{
                 display: 'flex', justifyContent: 'space-between',
                 alignItems: 'center', padding: '12px 16px',
@@ -90,6 +96,17 @@ export default function GameList({ user, onJoinGame, onNewGame }) {
                 <p style={{ margin: 0, fontWeight: 500, color: '#fff' }}>
                   vs {getOpponent(game)}
                 </p>
+                {game.room_code && (
+                  <p style={{ margin: 0, fontSize: 11, color: '#888', letterSpacing: 1 }}>
+                    code: <span
+                      style={{ color: '#ffdd44', cursor: 'pointer', fontWeight: 'bold' }}
+                      onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(game.room_code) }}
+                      title="Click to copy"
+                    >
+                      {game.room_code}
+                    </span>
+                  </p>
+                )}
                 <p style={{ margin: 0, fontSize: 11, color: '#555' }}>
                   {new Date(game.updated_at).toLocaleDateString()}
                 </p>

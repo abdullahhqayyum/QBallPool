@@ -25,6 +25,11 @@ export function joinRoom(roomId, playerId, gameId) {
   socket.emit('join_room', { code: roomId, roomId, playerId, gameId })
 }
 
+export function resumeGame(gameId, playerId) {
+  if (!socket.connected && !socket.active) socket.connect()
+  socket.emit('resume_game', { gameId, playerId })
+}
+
 export function sendTurnComplete(gameId, ballState, nextTurnPlayerId, ballInHand, shooterType, receiverType) {
   socket.emit('turn_complete', { gameId, ballState, nextTurnPlayerId, ballInHand, shooterType, receiverType })
 }
@@ -40,29 +45,40 @@ export function sendGameOver(gameId, winnerId) {
 export function sendRematchRequest() { socket.emit('rematch_request') }
 export function sendRematchCancel()  { socket.emit('rematch_cancel') }
 
-socket.on('turn_done', ({ nextTurnPlayerId, ballState, ballInHand, shooterType, receiverType }) => {
-  console.log('[turn_done received] nextTurnPlayerId:', nextTurnPlayerId, 'userId:', _scene?.registry.get('userId'), 'ballInHand:', ballInHand)
+function processTurnDone({ nextTurnPlayerId, ballState, ballInHand, shooterType, receiverType }) {
   if (!_scene) return
   const userId = _scene.registry.get('userId')
   const isMyTurn = nextTurnPlayerId === userId
-  console.log('[turn_done received] isMyTurn:', isMyTurn, 'ballInHand:', ballInHand)
+  console.log('[turn_done processed] nextTurnPlayerId:', nextTurnPlayerId, 'userId:', userId, 'isMyTurn:', isMyTurn)
   // Clear interpolation targets — turn_done gives us authoritative positions
   Object.keys(remoteTargets).forEach(k => delete remoteTargets[k])
   _scene.registry.set('myTurn', isMyTurn)
   if (_onTurnDone) {
     _onTurnDone(ballState, isMyTurn, ballInHand, shooterType, receiverType)
   }
+}
+
+socket.on('turn_done', ({ nextTurnPlayerId, ballState, ballInHand, shooterType, receiverType }) => {
+  // Buffer the event if scene isn't ready yet — retry until it is
+  if (!_scene) {
+    const retry = setInterval(() => {
+      if (!_scene) return
+      clearInterval(retry)
+      processTurnDone({ nextTurnPlayerId, ballState, ballInHand, shooterType, receiverType })
+    }, 200)
+    return
+  }
+  processTurnDone({ nextTurnPlayerId, ballState, ballInHand, shooterType, receiverType })
 })
 
 socket.on('rematch_requested', () => {
   if (_onRematchRequested) _onRematchRequested()
 })
 
-socket.on('rematch_start', ({ player1_id, player2_id, current_turn }) => {
-  if (_onRematchStart) _onRematchStart({ player1_id, player2_id, current_turn })
+socket.on('rematch_start', ({ player1_id, player2_id, current_turn, gameId }) => {
+  if (_onRematchStart) _onRematchStart({ player1_id, player2_id, current_turn, gameId })
 })
 
-// Target positions for smooth interpolation — keyed by ball label
 // Target positions for smooth interpolation — keyed by ball label
 export const remoteTargets = {}
 
@@ -93,8 +109,11 @@ socket.on('opponent_disconnected', ({ message }) => {
   }
 })
 
-socket.on('game_start', ({ player1_id, player2_id, current_turn, ballState }) => {
+socket.on('game_start', ({ player1_id, player2_id, current_turn, ballState, gameId }) => {
+  console.log('[game_start received] ballState:', !!ballState, 'scene exists:', !!_scene)
+  console.log('[game_start received] balls in scene:', _scene?.registry?.get('balls')?.length)
   if (!_scene) return
+  _scene.registry.set('opponentDisconnected', false)
 
   const userId = _scene.registry.get('userId')
 
@@ -104,7 +123,22 @@ socket.on('game_start', ({ player1_id, player2_id, current_turn, ballState }) =>
   _scene.registry.set('myTurn', current_turn === userId)
 
   if (ballState) {
-    _scene.registry.set('remoteBallState', ballState)
+    const sceneBalls = _scene.registry.get('balls')
+    if (sceneBalls && sceneBalls.length > 0) {
+      import('../game/balls').then(({ rehydrateBalls }) => {
+        try {
+          rehydrateBalls(_scene, ballState)
+        } catch (err) {
+          console.error('[socket] rehydrateBalls failed', err)
+          _scene.registry.set('remoteBallState', ballState)
+        }
+      }).catch(err => {
+        console.error('[socket] import rehydrateBalls failed', err)
+        _scene.registry.set('remoteBallState', ballState)
+      })
+    } else {
+      _scene.registry.set('remoteBallState', ballState)
+    }
   }
 
   console.log(

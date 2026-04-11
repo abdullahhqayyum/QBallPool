@@ -3,14 +3,13 @@ import React, { useState, useEffect } from 'react'
 export default function MatchResult({ result, onRematch, onHome, isOnline, onRematchRequest, onRematchCancel }) {
   const [rematchState, setRematchState] = useState('idle') // 'idle' | 'waiting' | 'opponent_wants'
 
-  // Parent signals that opponent clicked Play Again while we haven't yet
   useEffect(() => {
-    if (onRematchRequest) {
-      onRematchRequest(() => {
-        setRematchState(prev => prev === 'idle' ? 'opponent_wants' : prev)
-      })
+    if (!isOnline || !onRematchRequest) return
+    // Parent passes a setter so we can flip our local state when opponent acts
+    if (typeof onRematchRequest === 'function') {
+      onRematchRequest(() => setRematchState(prev => prev === 'idle' ? 'opponent_wants' : prev))
     }
-  }, [])
+  }, [isOnline, onRematchRequest])
 
   const isOffline = result && typeof result === 'object'
   const won       = isOffline ? null : result === 'win'
@@ -23,8 +22,6 @@ export default function MatchResult({ result, onRematch, onHome, isOnline, onRem
   function handlePlayAgain() {
     if (!isOnline) { onRematch(); return }
     setRematchState('waiting')
-    if (onRematchCancel?._registered) return
-    // Tell server we want a rematch
     import('../socket/client').then(({ sendRematchRequest }) => sendRematchRequest())
   }
 
