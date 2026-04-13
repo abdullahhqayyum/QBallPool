@@ -43,7 +43,7 @@ export function initEngine(containerId, gameState, onGameOver, onTurnEnd, onPock
   onTurnEndCb  = onTurnEnd
   onPocketCb   = onPocket
 
-  const config = {
+    const config = {
     type:            Phaser.AUTO,
     pixelArt:        false,
     antialias:       true,
@@ -51,16 +51,35 @@ export function initEngine(containerId, gameState, onGameOver, onTurnEnd, onPock
     height:          TABLE.height,
     parent:          containerId,
     backgroundColor: '#5c3a1e',
-    // We do NOT use Phaser.Scale.FIT — it changes the internal resolution and
-    // breaks pointer coordinates. Instead we set the canvas CSS size manually.
+    autoFocus:       false,
+    disableVisibilityChange: true,
+    fps: {
+      panicMax:        60,
+      smoothStep:      false,
+    },
     scene: {
       create() { sceneCreate.call(this, gameState) },
       update() { sceneUpdate.call(this) },
     },
   }
+ const game = new Phaser.Game(config)
 
-  const game = new Phaser.Game(config)
-
+  // Force Phaser to never pause regardless of tab/window visibility.
+  // disableVisibilityChange in config is unreliable in Phaser 3.60+,
+  // so we also override it directly after construction.
+  game.events.on('hidden', () => {
+    if (game.loop) game.loop.wake()
+  })
+  game.events.on('blur', () => {
+    if (game.loop) game.loop.wake()
+  })
+  // Belt-and-suspenders: poll every 500ms and wake the loop if it fell asleep
+  const keepAliveInterval = setInterval(() => {
+    try {
+      if (game.loop && !game.loop.running) game.loop.wake()
+    } catch (e) {}
+  }, 500)
+  game.__keepAliveInterval = keepAliveInterval
   // Apply CSS scaling once the canvas exists, and on every resize.
   const applyScale = () => {
     const canvas = game.canvas
@@ -116,9 +135,9 @@ export function initEngine(containerId, gameState, onGameOver, onTurnEnd, onPock
 export function destroyEngine(game) {
   if (!game) return
   if (typeof game.__scaleCleanup === 'function') game.__scaleCleanup()
+  if (game.__keepAliveInterval) clearInterval(game.__keepAliveInterval)
   game.destroy(true)
 }
-
 // ---------------------------------------------------------------------------
 // Rewind recording + playback
 // ---------------------------------------------------------------------------
@@ -155,7 +174,8 @@ export function snapshotForCheat(scene) {
   }))
   _preCheatSnapshot = {
     balls,
-    myTurn: scene.registry.get('myTurn'),
+    myTurn:         scene.registry.get('myTurn'),
+    placingCueBall: !!scene.registry.get('placingCueBall'),
   }
 }
 
@@ -216,7 +236,7 @@ export function useCheat(scene, onComplete) {
 }
 
 function _finishCheat(scene, onComplete) {
-  const { balls: snap, myTurn } = _preCheatSnapshot
+  const { balls: snap, myTurn, placingCueBall: hadBallInHand } = _preCheatSnapshot
   _preCheatSnapshot    = null
   scene._rewindPlaying = false
 
@@ -231,14 +251,24 @@ function _finishCheat(scene, onComplete) {
   scene.registry.set('pocketedThisTurn',     [])
   scene.registry.set('foul',                 false)
   scene.registry.set('myTurn',               myTurn)
-  scene.registry.set('cheatUsed',            true)
-  scene.registry.set('cheatAvailable',       false)
+
   scene.registry.set('pendingResult',        null)
 
-  useGameStore.setCheatUsed()
+  const cheatPlayer = myTurn ? 'p1' : 'p2'
+  const cheatUsedMap = { ...(scene.registry.get('cheatUsedMap') || {}), [cheatPlayer]: true }
+  scene.registry.set('cheatUsedMap',   cheatUsedMap)
+  scene.registry.set('cheatAvailable', false)
+
+  useGameStore.setCheatUsed(cheatPlayer)
   useGameStore.setCheatAvailable(false)
 
   resetCue(scene)
+
+  // If the player had ball-in-hand before the shot, restore it
+  if (hadBallInHand) {
+    respawnCueBall(scene, null, false)
+  }
+
   if (onComplete) onComplete()
 }
 
@@ -291,7 +321,7 @@ function sceneCreate(gameState) {
   )
   this.registry.set('wrongFirstContact', false)
 
-  this.registry.set('cheatUsed',      false)
+  this.registry.set('cheatUsedMap',   {})   // { p1: bool, p2: bool }
   this.registry.set('cheatAvailable', false)
   this._rewindFrames    = null
   this._rewindRecording = false
@@ -305,6 +335,7 @@ if (isRejoin && game?.my_type) {
   this.registry.set('myType',  null)
   this.registry.set('oppType', null)
   this.registry.set('breakDone', false)
+  this.registry.set('postBreakConfirm', false)
 }
 
   // If ?testrack=1 is present, force types so pot/foul rules are active
@@ -522,7 +553,11 @@ function sceneUpdate() {
     const isMyTurnForCheat = this.registry.get('myTurn')
     const modeForCheat = this.registry.get('mode')
     const cheatAllowedThisTurn = modeForCheat === 'offline' || isMyTurnForCheat
-    if (!this.registry.get('cheatUsed') && !this.registry.get('cheatAvailable') && cheatAllowedThisTurn) {
+    const cheatUsedMap    = this.registry.get('cheatUsedMap') || {}
+    const currentPlayer   = this.registry.get('myTurn') ? 'p1' : 'p2'
+    const thisPlayerUsed  = !!cheatUsedMap[currentPlayer]
+
+    if (!thisPlayerUsed && !this.registry.get('cheatAvailable') && cheatAllowedThisTurn) {
       this.registry.set('cheatAvailable', true)
       useGameStore.setCheatAvailable(true)
     }
@@ -673,41 +708,29 @@ function handleTurnEnd(scene) {
   // ── Break guard — skip foul logic for the opening shot, but DO assign types ──
   const breakDone = scene.registry.get('breakDone')
   if (!breakDone) {
-    scene.registry.set('breakDone', true)
-    if (scratched) {
-      switchTurn(scene)
-      handleFoulBallInHand()
-      return
-    }
-    
-    if (objectBalls.length === 0) {
-      switchTurn(scene)
-      notify(scene, { switched: true, foul: false })
-      return
-    }
+  scene.registry.set('breakDone', true)
 
-    // Balls pocketed on break — assign type immediately, keep turn
-    const hasSolid  = objectBalls.some(b => b.type === 'solid')
-    const hasStripe = objectBalls.some(b => b.type === 'stripe')
-    let assignedType = null
-
-    if (hasSolid && !hasStripe) {
-      assignedType = 'solid'
-    } else if (hasStripe && !hasSolid) {
-      assignedType = 'stripe'
-    } else if (hasSolid && hasStripe) {
-      // Mixed — assign based on first ball pocketed
-      assignedType = objectBalls[0].type
-    }
-
-    if (assignedType) {
-      scene.registry.set('myType',  assignedType)
-      scene.registry.set('oppType', assignedType === 'solid' ? 'stripe' : 'solid')
-    }
-
-    notify(scene, { switched: false, foul: false, assignedType })
+  if (scratched) {
+    switchTurn(scene)
+    handleFoulBallInHand()
     return
   }
+
+  if (objectBalls.length === 0) {
+    // Potted nothing on break — next player gets postBreakConfirm window
+    scene.registry.set('postBreakConfirm', true)
+    switchTurn(scene)
+    notify(scene, { switched: true, foul: false })
+    return
+  }
+
+  // Potted something on break — table stays open, NO type assigned.
+  // Breaker keeps their turn but postBreakConfirm is NOT set because
+  // the breaker already took their confirmation implicitly by continuing.
+  // Types will be assigned on the next pot by whoever pots first.
+  notify(scene, { switched: false, foul: false })
+  return
+}
     // ── end break guard ──
     // ── end break guard ──
 
@@ -795,6 +818,26 @@ function handleTurnEnd(scene) {
       scene.registry.set('oppType', assignedType === 'stripe' ? 'solid' : 'stripe')
     }
   }
+
+  // ── Post-break confirmation turn ──
+  // If this is the first shot after a scoreless break, the shooting player
+  // keeps their turn after potting to "confirm" their group — but ONLY this once.
+  const isPostBreakConfirm = scene.registry.get('postBreakConfirm')
+  if (isPostBreakConfirm) {
+    scene.registry.set('postBreakConfirm', false)  // consume the flag immediately
+
+    if (objectBalls.length === 0) {
+      // Potted nothing on confirmation turn — switch normally
+      switchTurn(scene)
+      notify(scene, { switched: true, foul: false, assignedType })
+      return
+    }
+
+    // Potted something — type was just assigned above, keep turn (confirmation complete)
+    notify(scene, { switched: false, foul: false, assignedType })
+    return
+  }
+  // ── end post-break confirmation ──
 
   const finalMyType       = scene.registry.get('myType')
   const finalMine         = currentlyMine
@@ -971,9 +1014,9 @@ export function respawnCueBall(scene, onPlaced, kitchenOnly = false) {
 
     const distToBall = Math.hypot(gp.x - cueBall.x, gp.y - cueBall.y)
 
-    // Only hijack the touch if they tapped near the cue ball.
-    // Tapping far away = trying to aim -> let cue.js handle it.
-    if (distToBall > BALL.radius * 5) return
+    // Only hijack the touch if they tapped very near the cue ball.
+    // Tapping farther away = trying to aim -> let cue.js handle it.
+    if (distToBall > BALL.radius * 1.5) return
 
     dragging = true
     cueBall._placing = true

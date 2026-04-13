@@ -3,12 +3,24 @@ import React from 'react'
 export default function HUD({ gameState, pocketed, myType, myTurn, foul }) {
   const solids  = [1,2,3,4,5,6,7]
   const stripes = [9,10,11,12,13,14,15]
+  const isOffline = gameState?.mode === 'offline'
 
   function ballPocketed(type, n) {
     return pocketed?.includes(`${type}-${n}`)
   }
 
-  const turnText = gameState?.mode === 'offline'
+  // In local 2P, myType is always P1's type (solid or stripe).
+  // Solids column is always P1 if P1=solid, else P2.
+  // Stripes column is always P1 if P1=stripe, else P2.
+  const solidOwner  = isOffline
+    ? (myType === 'solid' ? 'P1' : myType === 'stripe' ? 'P2' : '—')
+    : (myType === 'solid' ? 'YOU' : 'OPP')
+
+  const stripeOwner = isOffline
+    ? (myType === 'stripe' ? 'P1' : myType === 'solid' ? 'P2' : '—')
+    : (myType === 'stripe' ? 'YOU' : 'OPP')
+
+  const turnText = isOffline
     ? (myTurn ? 'P1 TURN' : 'P2 TURN')
     : (myTurn ? 'YOUR TURN' : 'THEIR TURN')
 
@@ -29,13 +41,8 @@ export default function HUD({ gameState, pocketed, myType, myTurn, foul }) {
       {/* Solids */}
       <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
         <span style={{ fontSize: 10, color: '#666', marginRight: 4 }}>
-          {gameState?.mode === 'offline'
-            ? (myType === 'solid' ? 'P1' : myType === 'stripe' ? 'P2' : 'P1')
-            : myType === 'solid' ? 'YOU' : 'OPP'}
-          {gameState?.mode === 'offline'
-            ? (myType === 'stripe' ? 'P1' : myType === 'solid' ? 'P2' : 'P2')
-            : myType === 'stripe' ? 'YOU' : 'OPP'}
-          </span>
+          {solidOwner}
+        </span>
         {solids.map(n => (
           <div key={n} style={{
             width: 16, height: 16, borderRadius: '50%',
@@ -60,6 +67,9 @@ export default function HUD({ gameState, pocketed, myType, myTurn, foul }) {
         {!myType && gameState?.mode !== 'offline' && (
           <div style={{ fontSize: 9, color: '#555', marginTop: 2 }}>pot a ball to assign</div>
         )}
+        {!myType && isOffline && (
+          <div style={{ fontSize: 9, color: '#555', marginTop: 2 }}>pot a ball to assign</div>
+        )}
       </div>
 
       {/* Stripes */}
@@ -73,7 +83,7 @@ export default function HUD({ gameState, pocketed, myType, myTurn, foul }) {
           }} />
         ))}
         <span style={{ fontSize: 10, color: '#666', marginLeft: 4 }}>
-          {gameState?.mode === 'offline' ? 'P2' : myType === 'stripe' ? 'YOU' : 'OPP'}
+          {stripeOwner}
         </span>
       </div>
 

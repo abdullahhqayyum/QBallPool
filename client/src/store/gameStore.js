@@ -12,8 +12,8 @@ export const initialGameState = {
   winner:      null,
   gameId:      null,
   user:        null,
-  cheatUsed:       false,   // ← NEW: has this player used their cheat
-  cheatAvailable:  false,   // ← NEW: is the cheat button currently usable
+  cheatUsedMap:    {},     // { p1: bool, p2: bool }
+  cheatAvailable:  false, 
   ongoingGames:  [],
   userStats:     null,
 }
@@ -73,8 +73,9 @@ useGameStore.setCheatAvailable = (val) => {
   subscribers.forEach(s => s(GLOBAL_STATE))
 }
 
-useGameStore.setCheatUsed = () => {
-  GLOBAL_STATE = { ...GLOBAL_STATE, cheatUsed: true, cheatAvailable: false }
+useGameStore.setCheatUsed = (player) => {
+  const cheatUsedMap = { ...(GLOBAL_STATE.cheatUsedMap || {}), [player]: true }
+  GLOBAL_STATE = { ...GLOBAL_STATE, cheatUsedMap, cheatAvailable: false }
   subscribers.forEach(s => s(GLOBAL_STATE))
 }
 

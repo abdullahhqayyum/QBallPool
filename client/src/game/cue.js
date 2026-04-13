@@ -196,7 +196,7 @@ export function setupCue(scene, onShoot) {
   }
 
   // ---- Mouse events on window (catches drags that leave the canvas) --------
-  const handleWindowMouseMove = (evt) => {
+const handleWindowMouseMove = (evt) => {
     if (!dragStart) return
     const gp = clientToGame(scene, evt.clientX, evt.clientY)
     dragCurrent = gp
@@ -210,7 +210,6 @@ export function setupCue(scene, onShoot) {
     releaseShot(gp.x, gp.y)
   }
 
-  // ---- Touch events on window (mobile drag-to-aim) -------------------------
   const handleWindowTouchMove = (evt) => {
     if (!dragStart) return
     evt.preventDefault()
@@ -275,19 +274,14 @@ export function setupCue(scene, onShoot) {
     if (!canShoot(scene)) return
     const gp = toGame(ptr)
     const cueBall = getCueBall(scene)
-    // Don't start drag from inside the cushion zone
-    const railBuffer = BALL.radius * 1.5
-    if (
-      gp.x < TABLE.playX1 + railBuffer || gp.x > TABLE.playX2 - railBuffer ||
-      gp.y < TABLE.playY1 + railBuffer || gp.y > TABLE.playY2 - railBuffer
-    ) return
+    if (!cueBall) return
+
+    // Skip if clicking directly on cue ball — that's placement territory
+    if (Math.hypot(gp.x - cueBall.x, gp.y - cueBall.y) < BALL.radius * 1.2) return
 
     dragStart   = gp
     dragCurrent = gp
-    // Lock the aim angle right now — it will not change as the player drags back
-    lockedAngle = cueBall
-      ? Math.atan2(cueBall.y - gp.y, cueBall.x - gp.x)
-      : null
+    lockedAngle = Math.atan2(cueBall.y - gp.y, cueBall.x - gp.x)
     power = 0
     smoothedPtr = null; smoothedDeflect = null
   })
@@ -301,27 +295,15 @@ export function setupCue(scene, onShoot) {
 // pointer originates outside the canvas (or leaves it). This lets players
 // begin aiming by clicking/tapping the page near the table.
 const handleWindowMouseDown = (evt) => {
-  // Only hijack if no drag is in progress and we can shoot
   if (dragStart) return
   if (!canShoot(scene)) return
   const cueBall = getCueBall(scene)
   if (!cueBall) return
   const gp = clientToGame(scene, evt.clientX, evt.clientY)
-  // Must be aiming at the table region — ignore clicks far outside
-  const buffer = TABLE.cueAimBuffer ?? 80
-  if (
-    gp.x < TABLE.playX1 - buffer || gp.x > TABLE.playX2 + buffer ||
-    gp.y < TABLE.playY1 - buffer || gp.y > TABLE.playY2 + buffer
-  ) return
-  // Must not be clicking ON the cue ball (that's placement drag)
-  if (Math.hypot(gp.x - cueBall.x, gp.y - cueBall.y) < BALL.radius * 4) return
 
-  // Don't start drag if pointer is inside the cushion (prevents stuck angles near rails)
-  const railBuffer = BALL.radius * 1.5
-  if (
-    gp.x < TABLE.playX1 + railBuffer || gp.x > TABLE.playX2 - railBuffer ||
-    gp.y < TABLE.playY1 + railBuffer || gp.y > TABLE.playY2 - railBuffer
-  ) return
+  // Allow drag from anywhere — no area restriction.
+  // Only skip if clicking directly ON the cue ball (that belongs to placement).
+  if (Math.hypot(gp.x - cueBall.x, gp.y - cueBall.y) < BALL.radius * 1.2) return
 
   dragStart   = gp
   dragCurrent = gp
@@ -338,19 +320,9 @@ const handleWindowTouchStart = (evt) => {
   if (!cueBall) return
   const t  = evt.changedTouches[0]
   const gp = clientToGame(scene, t.clientX, t.clientY)
-  const buffer = TABLE.cueAimBuffer ?? 80
-  if (
-    gp.x < TABLE.playX1 - buffer || gp.x > TABLE.playX2 + buffer ||
-    gp.y < TABLE.playY1 - buffer || gp.y > TABLE.playY2 + buffer
-  ) return
-  if (Math.hypot(gp.x - cueBall.x, gp.y - cueBall.y) < BALL.radius * 4) return
 
-  // Don't start drag if pointer is inside the cushion (prevents stuck angles near rails)
-  const railBuffer = BALL.radius * 1.5
-  if (
-    gp.x < TABLE.playX1 + railBuffer || gp.x > TABLE.playX2 - railBuffer ||
-    gp.y < TABLE.playY1 + railBuffer || gp.y > TABLE.playY2 - railBuffer
-  ) return
+  // Allow drag from anywhere — only skip if touching directly on cue ball.
+  if (Math.hypot(gp.x - cueBall.x, gp.y - cueBall.y) < BALL.radius * 1.2) return
 
   dragStart   = gp
   dragCurrent = gp

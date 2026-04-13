@@ -313,16 +313,11 @@ export default function GameCanvas({ gameState, onGameOver }) {
           setOpponentDisconnected(false)
 
           // Install a visibility handler to pause/resume Phaser when the tab is hidden
-          _visibilityHandler = () => {
+          __visibilityHandler = () => {
             const game = gameRef.current
             if (!game) return
             try {
-              if (document.hidden) {
-                if (game.scene && typeof game.scene.pause === 'function') game.scene.pause()
-                else if (game.loop && typeof game.loop.sleep === 'function') game.loop.sleep()
-              } else {
-                if (game.scene && typeof game.scene.resume === 'function') game.scene.resume()
-                else if (game.loop && typeof game.loop.wake === 'function') game.loop.wake()
+              if (!document.hidden) {
                 // Re-sync turn state from registry in case we missed events while hidden
                 const scene = game.scene.scenes?.[0]
                 if (scene) {
@@ -334,6 +329,7 @@ export default function GameCanvas({ gameState, onGameOver }) {
               // ignore
             }
           }
+          document.addEventListener('visibilitychange', _visibilityHandler)
           document.addEventListener('visibilitychange', _visibilityHandler)
 
           const userId    = gameState.user.id
@@ -960,9 +956,11 @@ export default function GameCanvas({ gameState, onGameOver }) {
               fontWeight: myType === 'solid' ? 'bold' : 'normal',
               letterSpacing: 1,
             }}>
-              {gameState?.mode === 'ai'
-                ? (myType === 'solid' ? '🟡 YOU' : myType === 'stripe' ? 'CPU' : 'P1')
-                : (!myType ? 'P1' : myType === 'solid' ? '● YOU' : '● OPP')}
+              {gameState?.mode === 'offline'
+                ? (!myType ? 'P1' : myType === 'solid' ? 'P1' : 'P2')
+                : gameState?.mode === 'ai'
+                  ? (myType === 'solid' ? '🟡 YOU' : myType === 'stripe' ? 'CPU' : 'P1')
+                  : (!myType ? 'P1' : myType === 'solid' ? '● YOU' : '● OPP')}
             </span>
               {[1,2,3,4,5,6,7].map(n => {
                 const isAssigned = myType !== null
@@ -1185,9 +1183,11 @@ export default function GameCanvas({ gameState, onGameOver }) {
               fontWeight: myType === 'stripe' ? 'bold' : 'normal',
               letterSpacing: 1,
             }}>
-              {gameState?.mode === 'ai'
-                ? (myType === 'stripe' ? '🔵 YOU' : myType === 'solid' ? 'CPU' : 'P2')
-                : (!myType ? 'P2' : myType === 'stripe' ? '● YOU' : '● OPP')}
+              {gameState?.mode === 'offline'
+                ? (!myType ? 'P2' : myType === 'stripe' ? 'P1' : 'P2')
+                : gameState?.mode === 'ai'
+                  ? (myType === 'stripe' ? '🔵 YOU' : myType === 'solid' ? 'CPU' : 'P2')
+                  : (!myType ? 'P2' : myType === 'stripe' ? '● YOU' : '● OPP')}
             </span>
           </div>
         </div>
