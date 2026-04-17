@@ -3,7 +3,8 @@ import { useGameStore } from '../store/gameStore'
 import { initEngine, destroyEngine, snapshotForCheat, useCheat } from '../game/engine'
 import MatchResult from './MatchResult'
 import PocketCallModal from './PocketCallModal'
-import { setSpin, getSpin } from '../game/cue'
+import { setupCue, resetCue, shootCue, predictCueFirstContact, clientToGame,
+         setSpin, getSpin, getCueStickPower } from '../game/cue'
 
 const isUuid = v => typeof v === 'string' &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v)
@@ -76,6 +77,116 @@ function Confetti({ active }) {
         zIndex: 30,
       }}
     />
+  )
+}
+
+// Always-visible side stick + power bar (handles both orientations internally)
+// Render when a game is active (no final result)
+function AlwaysSideControls({ result, sceneRef, isPortrait, stickPull, setStickPull }) {
+  if (result) return null
+  return (
+    <>
+      <SideCueStick
+        sceneRef={sceneRef}
+        isPortrait={isPortrait}
+        onPullChange={(p) => setStickPull(p)}
+      />
+    </>
+  )
+}
+
+// Right-side controls panel (settings, spin, cheat, help)
+function ControlsPanel({ isPortrait, spin, onSpinChange, cheatAvailable, cheatUsed, onCheat, showCheatTip, setShowCheatTip, setShowRules }) {
+  const iconSize = isPortrait ? 44 : 56
+  const spinSize = isPortrait ? 36 : 46
+  const cheatBtnH = isPortrait ? 32 : 36
+
+  return (
+    <div style={{
+      position: 'fixed',
+      zIndex: 60,
+      pointerEvents: 'auto',
+      display: 'flex',
+      gap: 10,
+      alignItems: 'center',
+      ...(isPortrait ? {
+        left: '50%',
+        bottom: 10,
+        transform: 'translateX(-50%)',
+        flexDirection: 'row',
+        width: 'auto',
+        padding: '6px 10px',
+        borderRadius: 12,
+        background: 'rgba(0,0,0,0.24)',
+      } : {
+        right: 12,
+        top: '50%',
+        transform: 'translateY(-50%)',
+        flexDirection: 'column',
+        width: 66,
+      })
+    }}>
+      <SpinPicker size={spinSize} spin={spin} onChange={onSpinChange} />
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+        <button
+          onMouseEnter={() => setShowCheatTip(true)}
+          onMouseLeave={() => setShowCheatTip(false)}
+          onTouchStart={() => { setShowCheatTip(true); setTimeout(() => setShowCheatTip(false), 1400) }}
+          onClick={onCheat}
+          style={{ width: Math.max(48, iconSize - 8), height: cheatBtnH, borderRadius: 8, background: cheatUsed ? '#111' : cheatAvailable ? '#7a1f00' : '#1c1c1c', color: cheatUsed ? '#333' : cheatAvailable ? '#fff' : '#3a3a3a', border: cheatAvailable && !cheatUsed ? '1px solid #ff5500' : '1px solid #333', cursor: cheatAvailable && !cheatUsed ? 'pointer' : 'default' }}
+        >{cheatUsed ? 'USED' : 'CHEAT'}</button>
+        {showCheatTip && (
+          (() => {
+            const base = {
+              position: 'absolute',
+              bottom: '100%',
+              marginBottom: 8,
+              background: '#1e1e1e',
+              border: '1px solid #444',
+              borderRadius: 6,
+              padding: '6px 10px',
+              fontSize: 10,
+              color: '#ccc',
+              fontFamily: 'monospace',
+              lineHeight: 1.5,
+              boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+              pointerEvents: 'auto',
+              whiteSpace: 'normal',
+              zIndex: 80,
+            }
+            const portraitStyle = { ...base, left: '50%', transform: 'translateX(-50%)', width: 140, maxWidth: 'calc(100vw - 40px)' }
+            const landscapeStyle = { ...base, right: 0, transform: 'translateX(0)', width: 140 }
+            return (
+              <div style={isPortrait ? portraitStyle : landscapeStyle}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                  <span style={{ color: '#ff8844', fontWeight: 'bold' }}>⏪ CHEAT</span>
+                  <span
+                    onClick={() => setShowCheatTip(false)}
+                    style={{ cursor: 'pointer', color: '#666', fontSize: 11, lineHeight: 1 }}
+                  >✕</span>
+                </div>
+                <div>While balls are rolling, press this to rewind the shot. One use per game.</div>
+                {/* Little arrow pointing down */}
+                <div style={{
+                  position:   'absolute',
+                  bottom:     -6,
+                  left:       '50%',
+                  transform:  'translateX(-50%)',
+                  width:      0, height: 0,
+                  borderLeft:  '5px solid transparent',
+                  borderRight: '5px solid transparent',
+                  borderTop:   '6px solid #444',
+                }} />
+              </div>
+            )
+          })()
+        )}
+      </div>
+      <div
+        onClick={() => setShowRules(true)}
+        style={{ width: iconSize, height: iconSize, borderRadius: 10, background: 'rgba(20,20,20,0.85)', border: '1px solid #333', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, cursor: 'pointer' }}
+      >❓</div>
+    </div>
   )
 }
 
@@ -184,6 +295,11 @@ export default function GameCanvas({ gameState, onGameOver }) {
   const [showConfetti,   setShowConfetti]   = useState(false)
 
   const [spin, setSpin_] = useState({ x: 0, y: 0 })
+
+  const [stickPull, setStickPull] = useState(0)   // 0..1
+  const [showRules, setShowRules] = useState(false)
+  const stickRef = useRef(null)
+  const isAimingRef = useRef(false)
 
   const [canvasWidth, setCanvasWidth] = useState(window.innerWidth)
 
@@ -309,27 +425,27 @@ export default function GameCanvas({ gameState, onGameOver }) {
             setTimeout(initOnline, 100)
             return
           }
+
           setScene(scene)
           setOpponentDisconnected(false)
 
           // Install a visibility handler to pause/resume Phaser when the tab is hidden
-          __visibilityHandler = () => {
+          _visibilityHandler = () => {
             const game = gameRef.current
             if (!game) return
             try {
               if (!document.hidden) {
                 // Re-sync turn state from registry in case we missed events while hidden
-                const scene = game.scene.scenes?.[0]
-                if (scene) {
-                  setMyTurn(!!scene.registry.get('myTurn'))
-                  setWaitingForOpponent(!scene.registry.get('myTurn'))
+                const s = game.scene.scenes?.[0]
+                if (s) {
+                  setMyTurn(!!s.registry.get('myTurn'))
+                  setWaitingForOpponent(!s.registry.get('myTurn'))
                 }
               }
             } catch (e) {
               // ignore
             }
           }
-          document.addEventListener('visibilitychange', _visibilityHandler)
           document.addEventListener('visibilitychange', _visibilityHandler)
 
           const userId    = gameState.user.id
@@ -563,6 +679,24 @@ export default function GameCanvas({ gameState, onGameOver }) {
     }
   }, [engineKey])
 
+  function updateAimFromEvent(e) {
+    try {
+      const scene = gameRef.current?.scene?.scenes?.[0]
+      if (!scene || typeof scene._aimSetAngle !== 'function') return
+      const touch = e.touches?.[0] ?? e.changedTouches?.[0]
+      const clientX = touch ? touch.clientX : e.clientX
+      const clientY = touch ? touch.clientY : e.clientY
+      const p = clientToGame(scene, clientX, clientY)
+      const balls = scene.registry.get('balls') || []
+      const cueBall = balls.find(b => b.label === 'cue')
+      if (!cueBall) return
+      const angle = Math.atan2(cueBall.y - p.y, cueBall.x - p.x)
+      scene._aimSetAngle(angle)
+    } catch (err) {
+      // ignore
+    }
+  }
+
   function handlePocketCall(pocketIndex) {
     const scene = gameRef.current?.scene?.scenes?.[0]
     // Write to registry FIRST so syncInterval sees it immediately on next tick
@@ -615,7 +749,7 @@ export default function GameCanvas({ gameState, onGameOver }) {
         display:            'flex',
         flexDirection:      'column',
         alignItems:         'center',
-        background:         '#0a0a0a',
+        background:         '#c0c0c0',
         minHeight:          '100vh',
         height:             isPortrait ? '100vh' : 'auto',
         width:              '100vw',
@@ -632,9 +766,21 @@ export default function GameCanvas({ gameState, onGameOver }) {
           0%, 100% { box-shadow: 0 0 6px #ff550055; }
           50%       { box-shadow: 0 0 14px #ff5500cc; border-color: #ff8844; }
         }
+        @keyframes arrowBounce {
+          0%, 100% { transform: translateY(0);   }
+          50%       { transform: translateY(3px); }
+        }
       `}</style>
       {/* Canvas wrapper — no extra borders; all visuals are inside Phaser */}
-        <div style={{
+        <div
+          onMouseDown={(e) => { e.preventDefault(); isAimingRef.current = true; updateAimFromEvent(e) }}
+          onMouseMove={(e) => { if (isAimingRef.current || e.buttons) { e.preventDefault(); updateAimFromEvent(e) } }}
+          onMouseUp={() => { isAimingRef.current = false }}
+          onMouseLeave={() => { isAimingRef.current = false }}
+          onTouchStart={(e) => { e.preventDefault(); isAimingRef.current = true; updateAimFromEvent(e) }}
+          onTouchMove={(e) => { e.preventDefault(); updateAimFromEvent(e) }}
+          onTouchEnd={() => { isAimingRef.current = false }}
+          style={{
           position:   'relative',
           lineHeight:  0,
           touchAction: 'none',
@@ -643,7 +789,7 @@ export default function GameCanvas({ gameState, onGameOver }) {
             const padding  = 8
             const scaleByW = (windowWidth - padding * 2) / TABLE_H
             const scaleByH = (windowHeight - MOBILE_HUD_H - padding * 2) / TABLE_W
-            const s        = Math.min(scaleByW, scaleByH)
+            const s        = Math.min(scaleByW, scaleByH) * 0.92
             return {
               position:        'fixed',
               top:             `${(windowHeight - MOBILE_HUD_H) / 2}px`,
@@ -656,7 +802,7 @@ export default function GameCanvas({ gameState, onGameOver }) {
             }
           })() : {
             position:  'relative',
-            width:     '100%',
+            width:     'calc(100% - 96px)',
             maxHeight: canvasMaxH,
           }),
         }}>
@@ -718,6 +864,44 @@ export default function GameCanvas({ gameState, onGameOver }) {
           </div>
         )}
 
+        {showRules && (
+          <div
+            onClick={() => setShowRules(false)}
+            style={{
+              position:   'absolute', inset: 0,
+              background: 'rgba(0,0,0,0.65)',
+              display:    'flex', alignItems: 'center', justifyContent: 'center',
+              zIndex:     60, cursor: 'pointer',
+            }}
+          >
+            <div style={{
+              background:   '#1a1a1a',
+              border:       '1.5px solid #333',
+              borderRadius: 16,
+              padding:      '16px 20px',
+              textAlign:    'left',
+              color:        '#fff',
+              fontFamily:   'monospace',
+              maxWidth:     520,
+              pointerEvents: 'auto',
+            }}>
+              <div style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 8 }}>8‑Ball Rules</div>
+              <div style={{ fontSize: 13, color: '#ccc', lineHeight: 1.5 }}>
+                <div><strong>Objective:</strong> Pocket your group (solids/stripes) then legally pocket the 8‑ball.</div>
+                <div style={{ height: 8 }} />
+                <div><strong>Turn play:</strong> Players alternate turns; you continue shooting until you fail to pot a ball or commit a foul.</div>
+                <div style={{ height: 8 }} />
+                <div><strong>Fouls:</strong> Cue ball pocketed, no rail contact after hit, or wrong ball hit first.</div>
+                <div style={{ height: 8 }} />
+                <div><strong>8‑ball:</strong> Pocket the 8‑ball only after clearing your group; potting the 8‑ball early loses the game.</div>
+              </div>
+              <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
+                <button onClick={() => setShowRules(false)} style={{ padding: '6px 10px', borderRadius: 8, background: '#333', color: '#fff', border: '1px solid #444' }}>Close</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {waitingForOpponent && (
           <div style={{
             position:      'absolute', top: 8, left: '50%',
@@ -766,171 +950,79 @@ export default function GameCanvas({ gameState, onGameOver }) {
 
       {/* HUD */}
       {isPortrait ? (
-        /* -- Mobile mini-HUD (portrait) -- */
-        <div style={{
-          position:   'fixed',
-          bottom:     0,
-          left:       0,
-          right:      0,
-          zIndex:     10,
-          background: '#111',
-          padding:    '6px 12px',
-          display:    'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          fontFamily: 'monospace',
-          boxSizing:  'border-box',
-          gap:        8,
-        }}>
-          {/* Turn indicator */}
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
-            {foul && (
-              <div style={{
-                color:        '#fff',
-                background:   '#cc0000',
-                fontSize:     9,
-                fontWeight:   'bold',
-                padding:      '1px 6px',
-                borderRadius: 3,
-                letterSpacing: 1,
-              }}>⚠ FOUL</div>
-            )}            
-            {placingCueBall && <div style={{ color: '#ffaa00', fontSize: 8 }}>BALL IN HAND</div>}
-            <div style={{
-              fontSize:     11,
-              fontWeight:   'bold',
-              padding:      '4px 10px',
-              borderRadius: 6,
-              background:   myTurn ? '#1a6b2a' : '#6b1a1a',
-              color:        '#fff',
-              whiteSpace:   'nowrap',
-            }}>
-              {gameState?.mode === 'ai'
-                ? (myTurn ? 'YOUR TURN' : 'CPU...')
-                : gameState?.mode === 'online'
-                  ? (myTurn ? 'YOUR TURN' : 'THEIR TURN')
-                  : (myTurn ? 'P1 TURN' : 'P2 TURN')}
-            </div>
-            {calledPocket !== null && (
-              <div style={{ fontSize: 8, color: '#ffdd44' }}>
-                8-ball → {['TL','TM','TR','BL','BM','BR'][calledPocket]}
-              </div>
-            )}
-          </div>
+  <>
+    <style>{`
+      @keyframes arrowBounce {
+        0%, 100% { transform: translateY(0); }
+        50%       { transform: translateY(4px); }
+      }
+    `}</style>
 
-          {/* Spin + Cheat */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+    {/* ── Top-left: You avatar ── */}
+      {/* ── Top-left: You avatar ── */}
+    <div style={{
+      position:  'fixed',
+      top:       18,
+      left:      12,
+      zIndex:    20,
+    }}>
+      <PlayerAvatar
+        label={gameState?.mode === 'ai' ? 'You' : gameState?.mode === 'online' ? 'You' : 'P1'}
+        isYou={true}
+        isActive={myTurn}
+        side="left"
+      />
+    </div>
 
-            {/* Spin picker + tooltip */}
-            <div style={{ position: 'relative' }}>
-              {showSpinTip && (
-                <div style={{
-                  position:     'absolute',
-                  bottom:       '110%',
-                  right:        0,
-                  background:   '#1e1e1e',
-                  border:       '1px solid #444',
-                  borderRadius: 6,
-                  padding:      '6px 10px',
-                  width:        140,
-                  fontSize:     10,
-                  color:        '#ccc',
-                  fontFamily:   'monospace',
-                  lineHeight:   1.5,
-                  zIndex:       50,
-                  whiteSpace:   'normal',
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                    <span style={{ color: '#ffdd44', fontWeight: 'bold' }}>◎ SPIN</span>
-                    <span
-                      onClick={() => setShowSpinTip(false)}
-                      style={{ cursor: 'pointer', color: '#666', fontSize: 11 }}
-                    >✕</span>
-                  </div>
-                  Drag the dot to add spin. Top/bottom = topspin/backspin. Left/right = sidespin.
-                  <div style={{
-                    position:   'absolute',
-                    bottom:     -6,
-                    right:      18,
-                    width:      0, height: 0,
-                    borderLeft:  '5px solid transparent',
-                    borderRight: '5px solid transparent',
-                    borderTop:   '6px solid #444',
-                  }} />
-                </div>
-              )}
-              <SpinPicker size={40} spin={spin} onChange={handleSpinChange} />
-            </div>
+    {/* ── Top-right: Opponent avatar ── */}
+    <div style={{
+      position:  'fixed',
+      top:       18,
+      right:     12,
+      zIndex:    20,
+    }}>
+      <PlayerAvatar
+        label={gameState?.mode === 'ai' ? 'CPU' : gameState?.mode === 'online' ? 'Opp' : 'P2'}
+        isYou={false}
+        isActive={!myTurn}
+        side="right"
+      />
+    </div>
 
-            {/* Cheat button + tooltip */}
-            <div style={{ position: 'relative' }}>
-              {showCheatTip && !cheatUsed && (
-                <div style={{
-                  position:     'absolute',
-                  bottom:       '110%',
-                  right:        0,
-                  background:   '#1e1e1e',
-                  border:       '1px solid #444',
-                  borderRadius: 6,
-                  padding:      '6px 10px',
-                  width:        140,
-                  fontSize:     10,
-                  color:        '#ccc',
-                  fontFamily:   'monospace',
-                  lineHeight:   1.5,
-                  zIndex:       50,
-                  whiteSpace:   'normal',
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                    <span style={{ color: '#ff8844', fontWeight: 'bold' }}>⏪ CHEAT</span>
-                    <span
-                      onClick={() => setShowCheatTip(false)}
-                      style={{ cursor: 'pointer', color: '#666', fontSize: 11 }}
-                    >✕</span>
-                  </div>
-                  While balls are rolling, press this to rewind the shot. One use per game.
-                  <div style={{
-                    position:   'absolute',
-                    bottom:     -6,
-                    right:      18,
-                    width:      0, height: 0,
-                    borderLeft:  '5px solid transparent',
-                    borderRight: '5px solid transparent',
-                    borderTop:   '6px solid #444',
-                  }} />
-                </div>
-              )}
-              <button
-                onClick={handleCheat}
-                style={{
-                  cursor:       cheatAvailable && !cheatUsed ? 'pointer' : 'default',
-                  background:   cheatUsed      ? '#111'
-                              : cheatAvailable ? '#7a1f00'
-                              : '#1c1c1c',
-                  border:       cheatAvailable && !cheatUsed ? '1px solid #ff5500' : '1px solid #333',
-                  borderRadius: 6,
-                  padding:      '4px 8px',
-                  color:        cheatUsed      ? '#333'
-                              : cheatAvailable ? '#fff'
-                              : '#3a3a3a',
-                  fontSize:     11,
-                  fontFamily:   'monospace',
-                  fontWeight:   'bold',
-                  display:      'flex',
-                  alignItems:   'center',
-                  gap:          3,
-                  boxShadow:    cheatAvailable && !cheatUsed ? '0 0 10px #ff550066' : 'none',
-                  transition:   'all 0.2s',
-                  animation:    cheatAvailable && !cheatUsed ? 'cheatPulse 1s ease-in-out infinite' : 'none',
-                }}
-              >
-                <span style={{ fontSize: 13, lineHeight: 1 }}>{cheatUsed ? '🚫' : '⏪'}</span>
-                <span style={{ fontSize: 8, letterSpacing: 0.5, lineHeight: 1 }}>{cheatUsed ? 'USED' : 'CHEAT'}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : (
+    {/* ── Left side: Cue stick (interactive) ── */}
+    <SideCueStick
+      sceneRef={gameRef}
+      isPortrait={isPortrait}
+      onPullChange={(p) => setStickPull(p)}
+    />
+
+    {/* ── Right side: Ball-in-hand indicator ── */}
+    {placingCueBall && <BallInHandIndicator />}
+
+    {/* ── Bottom-left: Settings ── */}
+    {/* ── Foul banner ── */}
+    {foul && (
+      <div style={{
+        position:      'fixed',
+        top:           12,
+        left:          '50%',
+        transform:     'translateX(-50%)',
+        zIndex:        30,
+        background:    '#cc0000',
+        color:         '#fff',
+        fontSize:      11,
+        fontWeight:    'bold',
+        padding:       '4px 14px',
+        borderRadius:  6,
+        fontFamily:    'sans-serif',
+        letterSpacing: 1,
+        pointerEvents: 'none',
+      }}>⚠ FOUL — BALL IN HAND</div>
+    )}
+
+    {/* Controls moved to right-side panel (ControlsPanel). */}
+  </>
+) : (
         /* -- Desktop full HUD (landscape) -- */
         <div
           ref={hudRef}
@@ -1025,119 +1117,7 @@ export default function GameCanvas({ gameState, onGameOver }) {
 
               {/* Cheat button + tooltip */}
               <div style={{ position: 'relative' }}>
-                {showCheatTip && !cheatUsed && (
-                  <div style={{
-                    position:     'absolute',
-                    bottom:       '110%',
-                    left:         '50%',
-                    transform:    'translateX(-50%)',
-                    background:   '#1e1e1e',
-                    border:       '1px solid #444',
-                    borderRadius: 6,
-                    padding:      '6px 10px',
-                    width:        140,
-                    fontSize:     10,
-                    color:        '#ccc',
-                    fontFamily:   'monospace',
-                    lineHeight:   1.5,
-                    zIndex:       50,
-                    pointerEvents: 'auto',
-                    whiteSpace:   'normal',
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                      <span style={{ color: '#ff8844', fontWeight: 'bold' }}>⏪ CHEAT</span>
-                      <span
-                        onClick={() => setShowCheatTip(false)}
-                        style={{ cursor: 'pointer', color: '#666', fontSize: 11, lineHeight: 1 }}
-                      >✕</span>
-                    </div>
-                    While balls are rolling, press this to rewind the shot. One use per game.
-                    {/* Little arrow pointing down */}
-                    <div style={{
-                      position:   'absolute',
-                      bottom:     -6,
-                      left:       '50%',
-                      transform:  'translateX(-50%)',
-                      width:      0, height: 0,
-                      borderLeft:  '5px solid transparent',
-                      borderRight: '5px solid transparent',
-                      borderTop:   '6px solid #444',
-                    }} />
-                  </div>
-                )}
-                <button
-                  onClick={handleCheat}
-                  style={{
-                    cursor:       cheatAvailable && !cheatUsed ? 'pointer' : 'default',
-                    background:   cheatUsed      ? '#111'
-                                : cheatAvailable ? '#7a1f00'
-                                : '#1c1c1c',
-                    border:       cheatAvailable && !cheatUsed
-                                    ? '1px solid #ff5500'
-                                    : '1px solid #333',
-                    borderRadius: 6,
-                    padding:      '1px 6px',
-                    color:        cheatUsed      ? '#333'
-                                : cheatAvailable ? '#fff'
-                                : '#3a3a3a',
-                    fontSize:     11,
-                    fontFamily:   'monospace',
-                    fontWeight:   'bold',
-                    display:      'flex',
-                    alignItems:   'center',
-                    gap:          2,
-                    boxShadow:    cheatAvailable && !cheatUsed ? '0 0 10px #ff550066' : 'none',
-                    transition:   'all 0.2s',
-                    animation:    cheatAvailable && !cheatUsed ? 'cheatPulse 1s ease-in-out infinite' : 'none',
-                  }}
-                >
-                  <span style={{ fontSize: 11, lineHeight: 1 }}>{cheatUsed ? '🚫' : '⏪'}</span>
-                  <span style={{ fontSize: 8, letterSpacing: 0.5, lineHeight: 1 }}>{cheatUsed ? 'USED' : 'CHEAT'}</span>
-                </button>
-              </div>
-
-              {/* Spin picker + tooltip */}
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center', height: 36 }}>
-                {showSpinTip && (
-                  <div style={{
-                    position:     'absolute',
-                    bottom:       '110%',
-                    left:         '50%',
-                    transform:    'translateX(-50%)',
-                    background:   '#1e1e1e',
-                    border:       '1px solid #444',
-                    borderRadius: 6,
-                    padding:      '6px 10px',
-                    width:        148,
-                    fontSize:     10,
-                    color:        '#ccc',
-                    fontFamily:   'monospace',
-                    lineHeight:   1.5,
-                    zIndex:       50,
-                    pointerEvents: 'auto',
-                    whiteSpace:   'normal',
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                      <span style={{ color: '#ffdd44', fontWeight: 'bold' }}>◎ SPIN</span>
-                      <span
-                        onClick={() => setShowSpinTip(false)}
-                        style={{ cursor: 'pointer', color: '#666', fontSize: 11, lineHeight: 1 }}
-                      >✕</span>
-                    </div>
-                    Drag the dot to add spin. Center = no spin. Top/bottom = topspin/backspin. Left/right = sidespin.
-                    <div style={{
-                      position:   'absolute',
-                      bottom:     -6,
-                      left:       '50%',
-                      transform:  'translateX(-50%)',
-                      width:      0, height: 0,
-                      borderLeft:  '5px solid transparent',
-                      borderRight: '5px solid transparent',
-                      borderTop:   '6px solid #444',
-                    }} />
-                  </div>
-                )}
-                <SpinPicker size={36} spin={spin} onChange={handleSpinChange} />
+                {/* Controls moved to right-side panel (ControlsPanel) */}
               </div>
             </div>
             {!myType && (
@@ -1200,6 +1180,216 @@ export default function GameCanvas({ gameState, onGameOver }) {
           showBanner={pocketCallVisible}
         />
       )}
+
+      {/* Always-visible side stick + power bar (both orientations) */}
+      <ControlsPanel
+        isPortrait={isPortrait}
+        spin={spin}
+        onSpinChange={handleSpinChange}
+        cheatAvailable={cheatAvailable}
+        cheatUsed={cheatUsed}
+        onCheat={handleCheat}
+        showCheatTip={showCheatTip}
+        setShowCheatTip={setShowCheatTip}
+        setShowRules={setShowRules}
+      />
+      <AlwaysSideControls
+        result={result}
+        sceneRef={gameRef}
+        isPortrait={isPortrait}
+        stickPull={stickPull}
+        setStickPull={setStickPull}
+      />
+    </div>
+  )
+}
+
+// Side cue stick (works for portrait and landscape)
+function SideCueStick({ sceneRef, isPortrait, onPullChange }) {
+  const stickRef = useRef(null)
+  const dragState = useRef({ dragging: false, startY: 0, startX: 0, power: 0 })
+  const MAX_DRAG = 120
+
+  const getClientPos = (e) => {
+    const touch = e.touches?.[0] ?? e.changedTouches?.[0]
+    return touch ? { x: touch.clientX, y: touch.clientY } : { x: e.clientX, y: e.clientY }
+  }
+
+  const onStart = (e) => {
+    e.stopPropagation()
+    const pos = getClientPos(e)
+    dragState.current = { dragging: true, startY: pos.y, startX: pos.x, power: 0 }
+  }
+
+  const onMove = (e) => {
+    if (!dragState.current.dragging) return
+    e.stopPropagation()
+    const pos = getClientPos(e)
+    // Use vertical drag for both portrait and landscape (landscape stick is rotated)
+    const delta = Math.max(0, pos.y - dragState.current.startY)
+    const power = Math.min(1, delta / MAX_DRAG)
+    dragState.current.power = power
+    onPullChange(power)
+
+    if (stickRef.current) {
+      // Move the stick vertically for both orientations (landscape stick is visually rotated)
+      stickRef.current.style.transform = `translateY(calc(-50% + ${power * 60}px))`
+    }
+  }
+
+  const onEnd = (e) => {
+    if (!dragState.current.dragging) return
+    e.stopPropagation()
+    dragState.current.dragging = false
+    const power = dragState.current.power
+
+    const scene = sceneRef.current?.scene?.scenes?.[0]
+    if (scene && typeof scene._stickFire === 'function' && power > 0.02) {
+      scene._stickFire(power)
+    }
+
+    onPullChange(0)
+    dragState.current.power = 0
+    if (stickRef.current) {
+      stickRef.current.style.transition = 'transform 0.2s ease-out'
+      stickRef.current.style.transform = 'translateY(-50%)'
+      setTimeout(() => { if (stickRef.current) stickRef.current.style.transition = '' }, 220)
+    }
+  }
+
+  if (isPortrait) {
+    return (
+      <div
+        ref={stickRef}
+        onMouseDown={onStart}
+        onMouseMove={onMove}
+        onMouseUp={onEnd}
+        onMouseLeave={onEnd}
+        onTouchStart={onStart}
+        onTouchMove={onMove}
+        onTouchEnd={onEnd}
+        style={{
+          position: 'fixed', left: 10, top: '50%', transform: 'translateY(-50%)', zIndex: 25,
+          cursor: 'ns-resize', touchAction: 'none', userSelect: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0, padding: '0 12px',
+        }}
+      >
+        <div style={{ width: 5, height: 16, background: 'linear-gradient(to bottom, #f0e8d0, #c8b06a)', borderRadius: '3px 3px 0 0', pointerEvents: 'none' }} />
+        <div style={{ width: 8, height: 6, background: '#e8e8e0', pointerEvents: 'none' }} />
+        <div style={{ width: 9, height: 200, background: 'linear-gradient(to right, #b8922a, #e8d080, #d4aa50, #b8922a)', pointerEvents: 'none' }} />
+        <div style={{ width: 12, height: 6, background: 'linear-gradient(to right, #444, #888, #444)', pointerEvents: 'none' }} />
+        <div style={{ width: 13, height: 60, background: 'linear-gradient(to right, #6B2F0A, #CD7832, #8B4513, #CD7832, #6B2F0A)', borderRadius: '0 0 5px 5px', pointerEvents: 'none' }} />
+      </div>
+    )
+  }
+
+  // Landscape: render the stick vertically (rotated 90deg visually)
+  return (
+    <div
+      ref={stickRef}
+      onMouseDown={onStart}
+      onMouseMove={onMove}
+      onMouseUp={onEnd}
+      onMouseLeave={onEnd}
+      onTouchStart={onStart}
+      onTouchMove={onMove}
+      onTouchEnd={onEnd}
+      style={{ position: 'fixed', left: 8, top: '50%', transform: 'translateY(-50%)', zIndex: 25, cursor: 'ns-resize', touchAction: 'none', userSelect: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0, padding: '0 12px' }}
+    >
+      <div style={{ width: 5, height: 16, background: 'linear-gradient(to bottom, #f0e8d0, #c8b06a)', borderRadius: '3px 3px 0 0', pointerEvents: 'none' }} />
+      <div style={{ width: 8, height: 6, background: '#e8e8e0', pointerEvents: 'none' }} />
+      <div style={{ width: 9, height: 160, background: 'linear-gradient(to bottom, #b8922a, #e8d080, #d4aa50, #b8922a)', pointerEvents: 'none' }} />
+      <div style={{ width: 12, height: 6, background: 'linear-gradient(to right, #444, #888, #444)', pointerEvents: 'none' }} />
+      <div style={{ width: 13, height: 60, background: 'linear-gradient(to right, #6B2F0A, #CD7832, #8B4513, #CD7832, #6B2F0A)', borderRadius: '0 0 5px 5px', pointerEvents: 'none' }} />
+    </div>
+  )
+}
+
+
+
+// ── Portrait: ball-in-hand indicator (red dot, right side) ───────────────────
+function BallInHandIndicator() {
+  return (
+    <div style={{
+      position:       'fixed',
+      right:          14,
+      top:            '50%',
+      transform:      'translateY(-50%)',
+      zIndex:         18,
+      width:          44,
+      height:         44,
+      borderRadius:   '50%',
+      background:     '#fff',
+      border:         '3px solid #ddd',
+      display:        'flex',
+      alignItems:     'center',
+      justifyContent: 'center',
+      boxShadow:      '0 2px 8px rgba(0,0,0,0.3)',
+      pointerEvents:  'none',
+    }}>
+      <div style={{
+        width:        16,
+        height:       16,
+        borderRadius: '50%',
+        background:   '#e53935',
+        boxShadow:    '0 0 6px rgba(229,57,53,0.6)',
+      }} />
+    </div>
+  )
+}
+
+function PlayerAvatar({ label, isYou, isActive, side }) {
+  const avatarEmoji = isYou ? '🧑🏾' : '👩🏼‍🦱'
+  const bannerBg    = isYou ? '#4caf50' : '#9c27b0'
+
+  return (
+    <div style={{
+      display:       'flex',
+      flexDirection: 'column',
+      alignItems:    'center',
+      gap:           0,
+      pointerEvents: 'none',
+    }}>
+      {/* Turn arrow — above active player, pointing DOWN toward avatar */}
+      {isActive && (
+        <div style={{
+          color:      '#4caf50',
+          fontSize:   14,
+          lineHeight: 1,
+          marginBottom: 2,
+          animation:  'arrowBounce 0.8s ease-in-out infinite',
+        }}>▼</div>
+      )}
+      {/* "You" green banner */}
+      {isYou && (
+        <div style={{
+          background:    '#4caf50',
+          color:         '#fff',
+          fontSize:      10,
+          fontWeight:    'bold',
+          padding:       '1px 10px',
+          borderRadius:  3,
+          fontFamily:    'sans-serif',
+          marginBottom:  3,
+          letterSpacing: 0.3,
+        }}>You</div>
+      )}
+      {/* Circular avatar */}
+      <div style={{
+            width:          44,
+            height:         44,
+        borderRadius:   '50%',
+        background:     bannerBg,
+        border:         isActive ? '2.5px solid #fff' : '2.5px solid transparent',
+        overflow:       'hidden',
+        display:        'flex',
+        alignItems:     'center',
+        justifyContent: 'center',
+            fontSize:       22,
+        boxShadow:      isActive ? '0 0 10px rgba(255,255,255,0.5)' : 'none',
+        transition:     'border 0.2s, box-shadow 0.2s',
+      }}>
+        {avatarEmoji}
+      </div>
     </div>
   )
 }

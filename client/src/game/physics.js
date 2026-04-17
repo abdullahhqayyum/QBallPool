@@ -146,55 +146,102 @@ export function stepPhysics(balls) {
 // ---------------------------------------------------------------------------
 export function drawTable(scene) {
   const { width, height, playX1, playX2, playY1, playY2 } = TABLE
-  const gfx = scene.add.graphics()
+  const g = scene.add.graphics()
 
-  // Full canvas wood background — matches engine backgroundColor so no black seam
-  gfx.fillStyle(0x5c3a1e)
-  gfx.fillRect(0, 0, width, height)
+  const railColor    = 0x5a2d0c  // dark mahogany
+  const railDark     = 0x3d1e08
+  const cushionColor = 0xd4c89a  // cream/ivory
+  const feltColor    = 0x2e8b57  // teal-green
 
-  // Subtle wood grain lines
-  gfx.lineStyle(1, 0x4a2e14, 0.4)
-  for (let y = 8; y < height; y += 16) {
-    gfx.beginPath()
-    gfx.moveTo(0, y)
-    gfx.lineTo(width, y)
-    gfx.strokePath()
+  // ── Full background (wood) ──
+  g.fillStyle(railColor)
+  g.fillRect(0, 0, width, height)
+
+  // Wood grain
+  g.lineStyle(1, railDark, 0.35)
+  for (let y = 6; y < height; y += 12) {
+    g.beginPath(); g.moveTo(0, y); g.lineTo(width, y); g.strokePath()
   }
 
-  // Inner cushion shadow (dark band inside the wood)
-  const cushionW = playX1
-  gfx.fillStyle(0x3a2010)
-  gfx.fillRect(cushionW - 4, cushionW - 4, playX2 - playX1 + 8, 4)           // top
-  gfx.fillRect(cushionW - 4, playY2,       playX2 - playX1 + 8, 4)            // bottom
-  gfx.fillRect(cushionW - 4, cushionW - 4, 4, playY2 - playY1 + 8)            // left
-  gfx.fillRect(playX2,       cushionW - 4, 4, playY2 - playY1 + 8)            // right
+  // ── Corner pocket cutouts (diagonal chamfers in the rail) ──
+  const cornerR = playX1 + 4
+  g.fillStyle(0x080808)
+  // top-left
+  g.fillTriangle(0, 0, cornerR * 2, 0, 0, cornerR * 2)
+  // top-right
+  g.fillTriangle(width, 0, width - cornerR * 2, 0, width, cornerR * 2)
+  // bottom-left
+  g.fillTriangle(0, height, cornerR * 2, height, 0, height - cornerR * 2)
+  // bottom-right
+  g.fillTriangle(width, height, width - cornerR * 2, height, width, height - cornerR * 2)
 
-  // Green felt
-  gfx.fillStyle(0x1a6b2a)
-  gfx.fillRect(playX1, playY1, playX2 - playX1, playY2 - playY1)
+  // ── Cream cushion inset band ──
+  const cx1 = playX1 - 5
+  const cy1 = playY1 - 5
+  const cw  = (playX2 - playX1) + 10
+  const ch  = (playY2 - playY1) + 10
+  g.fillStyle(cushionColor)
+  g.fillRect(cx1, cy1, cw, ch)
 
-  // Felt centre line
-  gfx.lineStyle(1, 0x177526, 0.3)
-  gfx.beginPath()
-  gfx.moveTo(width / 2, playY1)
-  gfx.lineTo(width / 2, playY2)
-  gfx.strokePath()
+  // Cushion inner shadow
+  g.fillStyle(0xb8a878)
+  g.fillRect(cx1 + 2, cy1 + 2, cw - 4, 3)   // top edge shadow
+  g.fillRect(cx1 + 2, cy1 + 2, 3, ch - 4)   // left edge shadow
 
-  // Baulk circle (left quarter)
-  gfx.lineStyle(1, 0x177526, 0.3)
-  gfx.strokeCircle(width * 0.25, height / 2, 40)
+  // ── Felt ──
+  g.fillStyle(feltColor)
+  g.fillRect(playX1, playY1, playX2 - playX1, playY2 - playY1)
 
-  // Pockets
+  // Felt subtle centre line
+  g.lineStyle(1, 0x267a47, 0.25)
+  g.beginPath(); g.moveTo(width / 2, playY1); g.lineTo(width / 2, playY2); g.strokePath()
+
+  // Baulk circle
+  g.lineStyle(1, 0x267a47, 0.2)
+  g.strokeCircle(width * 0.25, height / 2, 38)
+
+  // ── Rail diamonds ──
+  g.fillStyle(0xffffff, 0.7)
+  const diamondSize = 3
+  // Top & bottom rails — 6 evenly spaced per side
+  const hPositions = [1, 2, 3, 4, 5, 6].map(i => playX1 + (playX2 - playX1) * i / 7)
+  hPositions.forEach(x => {
+    // top rail
+    g.fillTriangle(x, cy1 + 3, x - diamondSize, cy1 + 7, x + diamondSize, cy1 + 7)
+    g.fillTriangle(x, cy1 + 11, x - diamondSize, cy1 + 7, x + diamondSize, cy1 + 7)
+    // bottom rail
+    const by = cy1 + ch
+    g.fillTriangle(x, by - 3, x - diamondSize, by - 7, x + diamondSize, by - 7)
+    g.fillTriangle(x, by - 11, x - diamondSize, by - 7, x + diamondSize, by - 7)
+  })
+  // Left & right rails — 3 per side
+  const vPositions = [1, 2, 3].map(i => playY1 + (playY2 - playY1) * i / 4)
+  vPositions.forEach(y => {
+    // left
+    g.fillTriangle(cx1 + 3, y, cx1 + 7, y - diamondSize, cx1 + 7, y + diamondSize)
+    g.fillTriangle(cx1 + 11, y, cx1 + 7, y - diamondSize, cx1 + 7, y + diamondSize)
+    // right
+    const rx = cx1 + cw
+    g.fillTriangle(rx - 3, y, rx - 7, y - diamondSize, rx - 7, y + diamondSize)
+    g.fillTriangle(rx - 11, y, rx - 7, y - diamondSize, rx - 7, y + diamondSize)
+  })
+
+  // ── Pockets ──
   POCKET.positions.forEach(([px, py]) => {
-    // Drop shadow
-    gfx.fillStyle(0x000000, 0.5)
-    gfx.fillCircle(px + 2, py + 2, 22)
-    // Pocket hole
-    gfx.fillStyle(0x050505)
-    gfx.fillCircle(px, py, 20)
-    // Pocket rim
-    gfx.lineStyle(2, 0x3a2010)
-    gfx.strokeCircle(px, py, 20)
+    // Outer wood ring
+    g.fillStyle(railDark)
+    g.fillCircle(px, py, 22)
+    // Inner black hole
+    g.fillStyle(0x050505)
+    g.fillCircle(px, py, 18)
+    // Subtle rim highlight
+    g.lineStyle(1.5, 0x7a4a1a, 0.8)
+    g.strokeCircle(px, py, 19)
+    // Depth shadow inside
+    g.fillStyle(0x000000, 0.6)
+    g.fillCircle(px + 2, py + 2, 14)
+    g.fillStyle(0x000000)
+    g.fillCircle(px, py, 14)
   })
 }
 
