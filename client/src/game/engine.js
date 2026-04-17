@@ -984,9 +984,15 @@ export function respawnCueBall(scene, onPlaced, kitchenOnly = false) {
     y: Math.max(TABLE.playY1 + BALL.radius, Math.min(TABLE.playY2 - BALL.radius, y)),
   })
   // Place at a default valid position but keep invisible until drag starts
+  // WITH THIS:
   cueBall.x = TABLE.width * 0.25
   cueBall.y = TABLE.height * 0.5
   if (cueBall.gfx) cueBall.gfx.setPosition(cueBall.x, cueBall.y)
+
+  // ── Ball is already at a valid position — allow shooting immediately.
+  // The player can still drag it to reposition, but doesn't have to.
+  cueBall._placing = false
+  scene.registry.set('placingCueBall', false)
 
   let dragging     = false
   let lastValidPos = { x: cueBall.x, y: cueBall.y }
@@ -1004,90 +1010,93 @@ export function respawnCueBall(scene, onPlaced, kitchenOnly = false) {
     scene.registry.set('kitchenOnly', false)
   }
 
+  // WITH THIS (same logic, but re-enables dragging without re-blocking shooting):
   const downHandler = (ptr) => {
-    const native = ptr.event
-    const touch  = native?.changedTouches?.[0] ?? native?.touches?.[0]
-    const client = touch ?? native
-    const gp     = (client?.clientX !== undefined)
-      ? clientToGame(scene, client.clientX, client.clientY)
-      : { x: ptr.x, y: ptr.y }
+      const native = ptr.event
+      const touch  = native?.changedTouches?.[0] ?? native?.touches?.[0]
+      const client = touch ?? native
+      const gp     = (client?.clientX !== undefined)
+        ? clientToGame(scene, client.clientX, client.clientY)
+        : { x: ptr.x, y: ptr.y }
 
-    const distToBall = Math.hypot(gp.x - cueBall.x, gp.y - cueBall.y)
+      const distToBall = Math.hypot(gp.x - cueBall.x, gp.y - cueBall.y)
 
-    // Only hijack the touch if they tapped very near the cue ball.
-    // Tapping farther away = trying to aim -> let cue.js handle it.
-    if (distToBall > BALL.radius * 1.5) return
+      // Only enter drag mode if tapping near the cue ball.
+      // Tapping elsewhere = aiming — let cue.js handle it, do NOT block shooting.
+      if (distToBall > BALL.radius * 3) return
 
-    dragging = true
-    cueBall._placing = true
-    scene.registry.set('placingCueBall', true)
-    scene.registry.set('kitchenOnly', (scene.registry.get('breakShotsRemaining') ?? 0) > 0)
-  }
+      dragging = true
+      // Only set placingCueBall while actively dragging, so shooting stays
+      // unblocked if the player simply taps away from the ball.
+      cueBall._placing = true
+      scene.registry.set('placingCueBall', true)
+      scene.registry.set('kitchenOnly', kitchenOnly)
+    }
 
-  const moveHandler = (ptr) => {
-    if (!dragging) return
+    const moveHandler = (ptr) => {
+      if (!dragging) return
 
-    const native = ptr.event
-    const touch  = native?.changedTouches?.[0] ?? native?.touches?.[0]
-    const client = touch ?? native
-    const gp     = (client?.clientX !== undefined)
-      ? clientToGame(scene, client.clientX, client.clientY)
-      : { x: ptr.x, y: ptr.y }
+      const native = ptr.event
+      const touch  = native?.changedTouches?.[0] ?? native?.touches?.[0]
+      const client = touch ?? native
+      const gp     = (client?.clientX !== undefined)
+        ? clientToGame(scene, client.clientX, client.clientY)
+        : { x: ptr.x, y: ptr.y }
 
-    const pos = clampToTable(gp.x, gp.y)
-    cueBall.x = pos.x
-    cueBall.y = pos.y
-    if (cueBall.gfx) cueBall.gfx.setPosition(pos.x, pos.y)
-    updateTint(isValidCuePlacement(scene, cueBall, pos.x, pos.y))
-  }
-
-  const upHandler = (ptr) => {
-    if (!dragging) return
-    dragging = false
-
-    const native = ptr.event
-    const touch  = native?.changedTouches?.[0] ?? native?.touches?.[0]
-    const client = touch ?? native
-    const gp     = (client?.clientX !== undefined)
-      ? clientToGame(scene, client.clientX, client.clientY)
-      : { x: ptr.x, y: ptr.y }
-
-    const pos   = clampToTable(gp.x, gp.y)
-    const valid = isValidCuePlacement(scene, cueBall, pos.x, pos.y)
-
-    if (valid) {
+      const pos = clampToTable(gp.x, gp.y)
       cueBall.x = pos.x
       cueBall.y = pos.y
-      lastValidPos = { x: pos.x, y: pos.y }
-    } else {
-      // Snap back to last valid position
-      cueBall.x = lastValidPos.x
-      cueBall.y = lastValidPos.y
+      if (cueBall.gfx) cueBall.gfx.setPosition(pos.x, pos.y)
+      updateTint(isValidCuePlacement(scene, cueBall, pos.x, pos.y))
     }
 
-    cueBall.vx = 0
-    cueBall.vy = 0
-    if (cueBall.gfx) {
-      cueBall.gfx.setPosition(cueBall.x, cueBall.y)
-      cueBall.gfx.setVisible(true)
-      cueBall.gfx.setAlpha(1)
+    const upHandler = (ptr) => {
+      if (!dragging) return
+      dragging = false
+
+      const native = ptr.event
+      const touch  = native?.changedTouches?.[0] ?? native?.touches?.[0]
+      const client = touch ?? native
+      const gp     = (client?.clientX !== undefined)
+        ? clientToGame(scene, client.clientX, client.clientY)
+        : { x: ptr.x, y: ptr.y }
+
+      const pos   = clampToTable(gp.x, gp.y)
+      const valid = isValidCuePlacement(scene, cueBall, pos.x, pos.y)
+
+      if (valid) {
+        cueBall.x = pos.x
+        cueBall.y = pos.y
+        lastValidPos = { x: pos.x, y: pos.y }
+      } else {
+        // Snap back to last valid position
+        cueBall.x = lastValidPos.x
+        cueBall.y = lastValidPos.y
+      }
+
+      cueBall.vx = 0
+      cueBall.vy = 0
+      if (cueBall.gfx) {
+        cueBall.gfx.setPosition(cueBall.x, cueBall.y)
+        cueBall.gfx.setVisible(true)
+        cueBall.gfx.setAlpha(1)
+      }
+
+      // Ball is placed — stop blocking the shoot flow.
+      // Player can now aim and shoot, OR tap the ball again to reposition.
+      cueBall._placing = false
+      scene.registry.set('placingCueBall', false)
+      scene.registry.set('kitchenOnly', false)
+      scene._suppressShotUntil = Date.now() + 200
     }
 
-    // Ball is placed — stop blocking the shoot flow.
-    // Player can now aim and shoot, OR tap the ball again to reposition.
-    cueBall._placing = false
-    scene.registry.set('placingCueBall', false)
-    scene.registry.set('kitchenOnly', false)
-    scene._suppressShotUntil = Date.now() + 200
+    scene.input.on('pointerdown', downHandler)
+    scene.input.on('pointermove', moveHandler)
+    scene.input.on('pointerup',   upHandler)
+
+    // Called by the shoot flow — tear down drag handlers after the shot fires
+    scene._cueBallPlacementCleanup = cleanup
   }
-
-  scene.input.on('pointerdown', downHandler)
-  scene.input.on('pointermove', moveHandler)
-  scene.input.on('pointerup',   upHandler)
-
-  // Called by the shoot flow — tear down drag handlers after the shot fires
-  scene._cueBallPlacementCleanup = cleanup
-}
 // ---------------------------------------------------------------------------
 // First contact tracking
 // ---------------------------------------------------------------------------

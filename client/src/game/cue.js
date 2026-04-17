@@ -129,6 +129,18 @@ export function setupCue(scene, onShoot) {
     scene.__clearAimGraphics = ()                  => { aimLine?.clear(); powerBar?.clear(); pullLine?.clear() }
 
     // ── Aiming: drag on the TABLE to set angle ──
+    // WITH THIS:
+    // WITH THIS (delta-based rotation — each swipe gesture continues from current angle):
+
+    // Tracks the screen position where the current drag stroke began,
+    // and the angle that was locked in at that moment.
+    let _dragOriginClient = null   // { x, y } in raw client pixels
+    let _dragOriginAngle  = null   // lockedAngle at the start of this stroke
+
+    // How many client-px of horizontal drag = one full rotation (360°).
+    // Lower = more sensitive. 320px feels natural on mobile.
+    const DRAG_PX_PER_REVOLUTION = 320
+
     scene.input.on('pointerdown', (pointer) => {
       if (scene._draggingCue) return
       if (!canShoot(scene))   return
@@ -137,10 +149,53 @@ export function setupCue(scene, onShoot) {
       const cueBall = getCueBall(scene)
       if (!cueBall) return
 
-      const p = toGame(pointer)
-      lockedAngle = Math.atan2(cueBall.y - p.y, cueBall.x - p.x)
+      // Record where this stroke started in raw client pixels,
+      // and remember the angle we're currently showing.
+      // We do NOT recalculate the angle from touch position —
+      // the aim line stays exactly where it is until the finger moves.
+      const native = pointer?.event
+      const touch  = native?.changedTouches?.[0] ?? native?.touches?.[0]
+      const client = touch ?? native
+      _dragOriginClient = {
+        x: client?.clientX ?? pointer.x,
+        y: client?.clientY ?? pointer.y,
+      }
+      _dragOriginAngle = lockedAngle
+
+      // Draw immediately so the line is visible as soon as the finger lands
+      drawAimLineByAngle(scene, lockedAngle)
+    })
+
+    scene.input.on('pointermove', (pointer) => {
+      if (!pointer.isDown)    return
+      if (scene._draggingCue) return
+      if (!canShoot(scene))   return
+      if (!_dragOriginClient) return
+
+      const cueBall = getCueBall(scene)
+      if (!cueBall) return
+
+      const native = pointer?.event
+      const touch  = native?.changedTouches?.[0] ?? native?.touches?.[0]
+      const client = touch ?? native
+      const curX   = client?.clientX ?? pointer.x
+      const curY   = client?.clientY ?? pointer.y
+
+      // Horizontal drag → rotate clockwise/counter-clockwise.
+      // dx > 0 (swipe right) = aim rotates clockwise (angle increases).
+      const dx        = curX - _dragOriginClient.x
+      const deltaAngle = (dx / DRAG_PX_PER_REVOLUTION) * (Math.PI * 2)
+      lockedAngle = _dragOriginAngle + deltaAngle
+
       scene.registry.set('aimAngle', lockedAngle)
       drawAimLineByAngle(scene, lockedAngle)
+    })
+
+    // On pointer up, reset drag origin so the next stroke starts fresh
+    // (but angle stays, so the line doesn't move on lift).
+    scene.input.on('pointerup', () => {
+      _dragOriginClient = null
+      _dragOriginAngle  = null
     })
 
     scene.input.on('pointermove', (pointer) => {

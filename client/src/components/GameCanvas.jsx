@@ -789,7 +789,7 @@ export default function GameCanvas({ gameState, onGameOver }) {
             const padding  = 8
             const scaleByW = (windowWidth - padding * 2) / TABLE_H
             const scaleByH = (windowHeight - MOBILE_HUD_H - padding * 2) / TABLE_W
-            const s        = Math.min(scaleByW, scaleByH) * 0.92
+            const s        = Math.min(scaleByW, scaleByH) * 0.84
             return {
               position:        'fixed',
               top:             `${(windowHeight - MOBILE_HUD_H) / 2}px`,
@@ -960,12 +960,12 @@ export default function GameCanvas({ gameState, onGameOver }) {
 
     {/* ── Top-left: You avatar ── */}
       {/* ── Top-left: You avatar ── */}
-    <div style={{
-      position:  'fixed',
-      top:       18,
-      left:      12,
-      zIndex:    20,
-    }}>
+      <div style={{
+        position:  'fixed',
+        top:       6,
+        left:      8,
+        zIndex:    22,
+      }}>
       <PlayerAvatar
         label={gameState?.mode === 'ai' ? 'You' : gameState?.mode === 'online' ? 'You' : 'P1'}
         isYou={true}
@@ -977,9 +977,9 @@ export default function GameCanvas({ gameState, onGameOver }) {
     {/* ── Top-right: Opponent avatar ── */}
     <div style={{
       position:  'fixed',
-      top:       18,
-      right:     12,
-      zIndex:    20,
+      top:       6,
+      right:     8,
+      zIndex:    22,
     }}>
       <PlayerAvatar
         label={gameState?.mode === 'ai' ? 'CPU' : gameState?.mode === 'online' ? 'Opp' : 'P2'}
@@ -1375,17 +1375,17 @@ function PlayerAvatar({ label, isYou, isActive, side }) {
       )}
       {/* Circular avatar */}
       <div style={{
-            width:          44,
-            height:         44,
+        width:          34,
+        height:         34,
         borderRadius:   '50%',
         background:     bannerBg,
-        border:         isActive ? '2.5px solid #fff' : '2.5px solid transparent',
+        border:         isActive ? '2px solid #fff' : '2px solid transparent',
         overflow:       'hidden',
         display:        'flex',
         alignItems:     'center',
         justifyContent: 'center',
-            fontSize:       22,
-        boxShadow:      isActive ? '0 0 10px rgba(255,255,255,0.5)' : 'none',
+        fontSize:       17,
+        boxShadow:      isActive ? '0 0 8px rgba(255,255,255,0.45)' : 'none',
         transition:     'border 0.2s, box-shadow 0.2s',
       }}>
         {avatarEmoji}
