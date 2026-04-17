@@ -656,11 +656,8 @@ export default function GameCanvas({ gameState, onGameOver }) {
 
       if (isMine && allDone && eightLeft && !alreadyCalled) {
         setNeedsPocketCall(true)
-        setPocketCallVisible(true)
-        setTimeout(() => setPocketCallVisible(false), 4000)
-      } else if (!isMine || alreadyCalled || !eightLeft) {
+      } else {
         setNeedsPocketCall(false)
-        setPocketCallVisible(false)
       }
     }, 300)
 
@@ -773,12 +770,12 @@ export default function GameCanvas({ gameState, onGameOver }) {
       `}</style>
       {/* Canvas wrapper — no extra borders; all visuals are inside Phaser */}
         <div
-          onMouseDown={(e) => { e.preventDefault(); isAimingRef.current = true; updateAimFromEvent(e) }}
-          onMouseMove={(e) => { if (isAimingRef.current || e.buttons) { e.preventDefault(); updateAimFromEvent(e) } }}
+          onMouseDown={(e) => { e.preventDefault(); isAimingRef.current = true }}
+          onMouseMove={(e) => { if (isAimingRef.current || e.buttons) e.preventDefault() }}
           onMouseUp={() => { isAimingRef.current = false }}
           onMouseLeave={() => { isAimingRef.current = false }}
-          onTouchStart={(e) => { e.preventDefault(); isAimingRef.current = true; updateAimFromEvent(e) }}
-          onTouchMove={(e) => { e.preventDefault(); updateAimFromEvent(e) }}
+          onTouchStart={(e) => { e.preventDefault(); isAimingRef.current = true }}
+          onTouchMove={(e) => { e.preventDefault() }}
           onTouchEnd={() => { isAimingRef.current = false }}
           style={{
           position:   'relative',
@@ -1173,11 +1170,11 @@ export default function GameCanvas({ gameState, onGameOver }) {
         </div>
       )}
 
-      {needsPocketCall && (
+      {needsPocketCall && canvasRectRef.current && (
         <PocketCallModal
           onCall={handlePocketCall}
           canvasRect={canvasRectRef.current}
-          showBanner={pocketCallVisible}
+          showBanner={true}
         />
       )}
 
@@ -1205,101 +1202,111 @@ export default function GameCanvas({ gameState, onGameOver }) {
 }
 
 // Side cue stick (works for portrait and landscape)
+// REPLACE the entire SideCueStick function with this:
 function SideCueStick({ sceneRef, isPortrait, onPullChange }) {
   const stickRef = useRef(null)
-  const dragState = useRef({ dragging: false, startY: 0, startX: 0, power: 0 })
-  const MAX_DRAG = 120
+  const dragState = useRef({ dragging: false, startY: 0, power: 0 })
+  const MAX_DRAG = 220
 
-  const getClientPos = (e) => {
+  const getClientY = (e) => {
     const touch = e.touches?.[0] ?? e.changedTouches?.[0]
-    return touch ? { x: touch.clientX, y: touch.clientY } : { x: e.clientX, y: e.clientY }
+    return touch ? touch.clientY : e.clientY
   }
+
+  // WITH THIS:
 
   const onStart = (e) => {
     e.stopPropagation()
-    const pos = getClientPos(e)
-    dragState.current = { dragging: true, startY: pos.y, startX: pos.x, power: 0 }
+    dragState.current = { dragging: true, startY: getClientY(e), power: 0 }
   }
 
-  const onMove = (e) => {
-    if (!dragState.current.dragging) return
-    e.stopPropagation()
-    const pos = getClientPos(e)
-    // Use vertical drag for both portrait and landscape (landscape stick is rotated)
-    const delta = Math.max(0, pos.y - dragState.current.startY)
-    const power = Math.min(1, delta / MAX_DRAG)
-    dragState.current.power = power
-    onPullChange(power)
-
-    if (stickRef.current) {
-      // Move the stick vertically for both orientations (landscape stick is visually rotated)
-      stickRef.current.style.transform = `translateY(calc(-50% + ${power * 60}px))`
-    }
-  }
-
-  const onEnd = (e) => {
-    if (!dragState.current.dragging) return
-    e.stopPropagation()
-    dragState.current.dragging = false
-    const power = dragState.current.power
-
-    const scene = sceneRef.current?.scene?.scenes?.[0]
-    if (scene && typeof scene._stickFire === 'function' && power > 0.02) {
-      scene._stickFire(power)
+  // Move and end are on window so they keep firing even when finger
+  // slides outside the stick element — no lag, no missed releases
+  useEffect(() => {
+    const handleMove = (e) => {
+      if (!dragState.current.dragging) return
+      const clientY = e.touches?.[0]?.clientY ?? e.changedTouches?.[0]?.clientY ?? e.clientY
+      const delta = clientY - dragState.current.startY
+      const power = Math.max(0, Math.min(1, delta / MAX_DRAG))
+      dragState.current.power = power
+      onPullChange(power)
+      if (stickRef.current) {
+        const visualTravel = Math.pow(power, 0.7) * 110
+        stickRef.current.style.transform = `translateY(calc(-50% + ${visualTravel}px))`
+      }
     }
 
-    onPullChange(0)
-    dragState.current.power = 0
-    if (stickRef.current) {
-      stickRef.current.style.transition = 'transform 0.2s ease-out'
-      stickRef.current.style.transform = 'translateY(-50%)'
-      setTimeout(() => { if (stickRef.current) stickRef.current.style.transition = '' }, 220)
+    const handleEnd = () => {
+      if (!dragState.current.dragging) return
+      dragState.current.dragging = false
+      const power = dragState.current.power
+
+      if (power < 0.03) {
+        onPullChange(0)
+        dragState.current.power = 0
+        if (stickRef.current) {
+          stickRef.current.style.transition = 'transform 0.2s ease-out'
+          stickRef.current.style.transform  = 'translateY(-50%)'
+          setTimeout(() => { if (stickRef.current) stickRef.current.style.transition = '' }, 220)
+        }
+        return
+      }
+
+      const scene = sceneRef.current?.scene?.scenes?.[0]
+      if (scene && typeof scene._stickFire === 'function') {
+        scene._stickFire(Math.pow(power, 0.75))
+      }
+
+      onPullChange(0)
+      dragState.current.power = 0
+      if (stickRef.current) {
+        stickRef.current.style.transition = 'transform 0.2s ease-out'
+        stickRef.current.style.transform  = 'translateY(-50%)'
+        setTimeout(() => { if (stickRef.current) stickRef.current.style.transition = '' }, 220)
+      }
     }
-  }
 
-  if (isPortrait) {
-    return (
-      <div
-        ref={stickRef}
-        onMouseDown={onStart}
-        onMouseMove={onMove}
-        onMouseUp={onEnd}
-        onMouseLeave={onEnd}
-        onTouchStart={onStart}
-        onTouchMove={onMove}
-        onTouchEnd={onEnd}
-        style={{
-          position: 'fixed', left: 10, top: '50%', transform: 'translateY(-50%)', zIndex: 25,
-          cursor: 'ns-resize', touchAction: 'none', userSelect: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0, padding: '0 12px',
-        }}
-      >
-        <div style={{ width: 5, height: 16, background: 'linear-gradient(to bottom, #f0e8d0, #c8b06a)', borderRadius: '3px 3px 0 0', pointerEvents: 'none' }} />
-        <div style={{ width: 8, height: 6, background: '#e8e8e0', pointerEvents: 'none' }} />
-        <div style={{ width: 9, height: 200, background: 'linear-gradient(to right, #b8922a, #e8d080, #d4aa50, #b8922a)', pointerEvents: 'none' }} />
-        <div style={{ width: 12, height: 6, background: 'linear-gradient(to right, #444, #888, #444)', pointerEvents: 'none' }} />
-        <div style={{ width: 13, height: 60, background: 'linear-gradient(to right, #6B2F0A, #CD7832, #8B4513, #CD7832, #6B2F0A)', borderRadius: '0 0 5px 5px', pointerEvents: 'none' }} />
-      </div>
-    )
-  }
+    window.addEventListener('mousemove',  handleMove)
+    window.addEventListener('touchmove',  handleMove, { passive: true })
+    window.addEventListener('mouseup',    handleEnd)
+    window.addEventListener('touchend',   handleEnd)
 
-  // Landscape: render the stick vertically (rotated 90deg visually)
+    return () => {
+      window.removeEventListener('mousemove',  handleMove)
+      window.removeEventListener('touchmove',  handleMove)
+      window.removeEventListener('mouseup',    handleEnd)
+      window.removeEventListener('touchend',   handleEnd)
+    }
+  }, [onPullChange])
+
+  // onEnd is no longer needed on the div — window handles it
+
+  const stickBody = (height) => (
+    <>
+      <div style={{ width: 5, height: 16, background: 'linear-gradient(to bottom, #f0e8d0, #c8b06a)', borderRadius: '3px 3px 0 0', pointerEvents: 'none' }} />
+      <div style={{ width: 8, height: 6, background: '#e8e8e0', pointerEvents: 'none' }} />
+      <div style={{ width: 9, height: height, background: 'linear-gradient(to right, #b8922a, #e8d080, #d4aa50, #b8922a)', pointerEvents: 'none' }} />
+      <div style={{ width: 12, height: 6, background: 'linear-gradient(to right, #444, #888, #444)', pointerEvents: 'none' }} />
+      <div style={{ width: 13, height: 60, background: 'linear-gradient(to right, #6B2F0A, #CD7832, #8B4513, #CD7832, #6B2F0A)', borderRadius: '0 0 5px 5px', pointerEvents: 'none' }} />
+    </>
+  )
+
   return (
+// WITH THIS — only onMouseDown and onTouchStart remain on the div:
     <div
       ref={stickRef}
       onMouseDown={onStart}
-      onMouseMove={onMove}
-      onMouseUp={onEnd}
-      onMouseLeave={onEnd}
       onTouchStart={onStart}
-      onTouchMove={onMove}
-      onTouchEnd={onEnd}
-      style={{ position: 'fixed', left: 8, top: '50%', transform: 'translateY(-50%)', zIndex: 25, cursor: 'ns-resize', touchAction: 'none', userSelect: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0, padding: '0 12px' }}
+      style={{
+        position: 'fixed', left: 10, top: '50%',
+        transform: 'translateY(-50%)', zIndex: 25,
+        cursor: 'ns-resize', touchAction: 'none',
+        userSelect: 'none', display: 'flex',
+        flexDirection: 'column', alignItems: 'center',
+        gap: 0, padding: '0 12px',
+      }}
     >
-      <div style={{ width: 5, height: 16, background: 'linear-gradient(to bottom, #f0e8d0, #c8b06a)', borderRadius: '3px 3px 0 0', pointerEvents: 'none' }} />
-      <div style={{ width: 8, height: 6, background: '#e8e8e0', pointerEvents: 'none' }} />
-      <div style={{ width: 9, height: 160, background: 'linear-gradient(to bottom, #b8922a, #e8d080, #d4aa50, #b8922a)', pointerEvents: 'none' }} />
-      <div style={{ width: 12, height: 6, background: 'linear-gradient(to right, #444, #888, #444)', pointerEvents: 'none' }} />
-      <div style={{ width: 13, height: 60, background: 'linear-gradient(to right, #6B2F0A, #CD7832, #8B4513, #CD7832, #6B2F0A)', borderRadius: '0 0 5px 5px', pointerEvents: 'none' }} />
+      {stickBody(isPortrait ? 200 : 160)}
     </div>
   )
 }

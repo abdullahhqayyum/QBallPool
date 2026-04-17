@@ -134,12 +134,10 @@ export function setupCue(scene, onShoot) {
 
     // Tracks the screen position where the current drag stroke began,
     // and the angle that was locked in at that moment.
-    let _dragOriginClient = null   // { x, y } in raw client pixels
-    let _dragOriginAngle  = null   // lockedAngle at the start of this stroke
+    
+    // WITH THIS — angle computed from game-space position on move only, never on down:
 
-    // How many client-px of horizontal drag = one full rotation (360°).
-    // Lower = more sensitive. 320px feels natural on mobile.
-    const DRAG_PX_PER_REVOLUTION = 320
+    let _prevGamePos = null  // last known game-space pointer position
 
     scene.input.on('pointerdown', (pointer) => {
       if (scene._draggingCue) return
@@ -149,20 +147,15 @@ export function setupCue(scene, onShoot) {
       const cueBall = getCueBall(scene)
       if (!cueBall) return
 
-      // Record where this stroke started in raw client pixels,
-      // and remember the angle we're currently showing.
-      // We do NOT recalculate the angle from touch position —
-      // the aim line stays exactly where it is until the finger moves.
+      // Snapshot current game-space position as the drag baseline.
+      // Do NOT recalculate lockedAngle — aim line stays where it is on touch-down.
       const native = pointer?.event
       const touch  = native?.changedTouches?.[0] ?? native?.touches?.[0]
       const client = touch ?? native
-      _dragOriginClient = {
-        x: client?.clientX ?? pointer.x,
-        y: client?.clientY ?? pointer.y,
-      }
-      _dragOriginAngle = lockedAngle
+      _prevGamePos = (client?.clientX !== undefined)
+        ? clientToGame(scene, client.clientX, client.clientY)
+        : { x: pointer.x, y: pointer.y }
 
-      // Draw immediately so the line is visible as soon as the finger lands
       drawAimLineByAngle(scene, lockedAngle)
     })
 
@@ -170,7 +163,7 @@ export function setupCue(scene, onShoot) {
       if (!pointer.isDown)    return
       if (scene._draggingCue) return
       if (!canShoot(scene))   return
-      if (!_dragOriginClient) return
+      if (!_prevGamePos)      return
 
       const cueBall = getCueBall(scene)
       if (!cueBall) return
@@ -178,39 +171,118 @@ export function setupCue(scene, onShoot) {
       const native = pointer?.event
       const touch  = native?.changedTouches?.[0] ?? native?.touches?.[0]
       const client = touch ?? native
-      const curX   = client?.clientX ?? pointer.x
-      const curY   = client?.clientY ?? pointer.y
+      const curPos = (client?.clientX !== undefined)
+        ? clientToGame(scene, client.clientX, client.clientY)
+        : { x: pointer.x, y: pointer.y }
 
-      // Horizontal drag → rotate clockwise/counter-clockwise.
-      // dx > 0 (swipe right) = aim rotates clockwise (angle increases).
-      const dx        = curX - _dragOriginClient.x
-      const deltaAngle = (dx / DRAG_PX_PER_REVOLUTION) * (Math.PI * 2)
-      lockedAngle = _dragOriginAngle + deltaAngle
+      // Compute angle from cue ball to current pointer in game space.
+      // This is scale/rotation-aware because clientToGame handles portrait transform.
+      const newAngle = Math.atan2(cueBall.y - curPos.y, cueBall.x - curPos.x)
+
+      // Compute how much the angle changed since last frame and ADD it
+      // to lockedAngle — never snap to absolute position.
+      const prevAngle = Math.atan2(cueBall.y - _prevGamePos.y, cueBall.x - _prevGamePos.x)
+      let delta = newAngle - prevAngle
+
+      // Wrap delta to [-π, π] to avoid jumping across the ±π boundary
+      if (delta >  Math.PI) delta -= Math.PI * 2
+      if (delta < -Math.PI) delta += Math.PI * 2
+
+      lockedAngle += delta
+      _prevGamePos = curPos
 
       scene.registry.set('aimAngle', lockedAngle)
       drawAimLineByAngle(scene, lockedAngle)
     })
 
-    // On pointer up, reset drag origin so the next stroke starts fresh
-    // (but angle stays, so the line doesn't move on lift).
     scene.input.on('pointerup', () => {
-      _dragOriginClient = null
-      _dragOriginAngle  = null
+      _prevGamePos = null
     })
-
-    scene.input.on('pointermove', (pointer) => {
-      if (!pointer.isDown)    return
-      if (scene._draggingCue) return
-      if (!canShoot(scene))   return
+    // Global pointer listeners so aiming works anywhere on screen
+    // (outside the Phaser canvas, over the gray background, HUD, etc.)
+    const onWindowMouseMove = (e) => {
+      if (!e.buttons)      return
+      if (!_prevGamePos)   return
+      if (!canShoot(scene)) return
 
       const cueBall = getCueBall(scene)
       if (!cueBall) return
 
-      const p = toGame(pointer)
-      lockedAngle = Math.atan2(cueBall.y - p.y, cueBall.x - p.x)
+      const curPos  = clientToGame(scene, e.clientX, e.clientY)
+      const newAngle = Math.atan2(cueBall.y - curPos.y, cueBall.x - curPos.x)
+      const prevAngle = Math.atan2(cueBall.y - _prevGamePos.y, cueBall.x - _prevGamePos.x)
+      let delta = newAngle - prevAngle
+      if (delta >  Math.PI) delta -= Math.PI * 2
+      if (delta < -Math.PI) delta += Math.PI * 2
+
+      lockedAngle  += delta
+      _prevGamePos  = curPos
       scene.registry.set('aimAngle', lockedAngle)
       drawAimLineByAngle(scene, lockedAngle)
+    }
+
+    const onWindowTouchMove = (e) => {
+      if (!_prevGamePos)    return
+      if (!canShoot(scene)) return
+      const touch = e.changedTouches?.[0] ?? e.touches?.[0]
+      if (!touch) return
+
+      const cueBall = getCueBall(scene)
+      if (!cueBall) return
+
+      const curPos   = clientToGame(scene, touch.clientX, touch.clientY)
+      const newAngle = Math.atan2(cueBall.y - curPos.y, cueBall.x - curPos.x)
+      const prevAngle = Math.atan2(cueBall.y - _prevGamePos.y, cueBall.x - _prevGamePos.x)
+      let delta = newAngle - prevAngle
+      if (delta >  Math.PI) delta -= Math.PI * 2
+      if (delta < -Math.PI) delta += Math.PI * 2
+
+      lockedAngle  += delta
+      _prevGamePos  = curPos
+      scene.registry.set('aimAngle', lockedAngle)
+      drawAimLineByAngle(scene, lockedAngle)
+    }
+
+    const onWindowPointerDown = (e) => {
+      if (!canShoot(scene)) return
+      const cueBall = getCueBall(scene)
+      if (!cueBall) return
+      const touch = e.changedTouches?.[0]
+      const clientX = touch ? touch.clientX : e.clientX
+      const clientY = touch ? touch.clientY : e.clientY
+      _prevGamePos = clientToGame(scene, clientX, clientY)
+      drawAimLineByAngle(scene, lockedAngle)
+    }
+
+    const onWindowPointerUp = () => {
+      _prevGamePos = null
+    }
+
+    window.addEventListener('mousemove',   onWindowMouseMove)
+    window.addEventListener('touchmove',   onWindowTouchMove,   { passive: true })
+    window.addEventListener('mousedown',   onWindowPointerDown)
+    window.addEventListener('touchstart',  onWindowPointerDown, { passive: true })
+    window.addEventListener('mouseup',     onWindowPointerUp)
+    window.addEventListener('touchend',    onWindowPointerUp)
+
+    // Clean up when scene shuts down
+    scene.events.once('shutdown', () => {
+      window.removeEventListener('mousemove',  onWindowMouseMove)
+      window.removeEventListener('touchmove',  onWindowTouchMove)
+      window.removeEventListener('mousedown',  onWindowPointerDown)
+      window.removeEventListener('touchstart', onWindowPointerDown)
+      window.removeEventListener('mouseup',    onWindowPointerUp)
+      window.removeEventListener('touchend',   onWindowPointerUp)
     })
+    scene.events.once('destroy', () => {
+      window.removeEventListener('mousemove',  onWindowMouseMove)
+      window.removeEventListener('touchmove',  onWindowTouchMove)
+      window.removeEventListener('mousedown',  onWindowPointerDown)
+      window.removeEventListener('touchstart', onWindowPointerDown)
+      window.removeEventListener('mouseup',    onWindowPointerUp)
+      window.removeEventListener('touchend',   onWindowPointerUp)
+    })
+
 
     scene._aimGetAngle = () => lockedAngle
     scene._aimSetAngle = (a) => {
@@ -682,7 +754,7 @@ function drawAimLineByAngle(scene, angle) {
     }
     const { ghostX, ghostY, deflectAngle, targetAngle, centrality } = impact
 
-    // Aim line to ghost — red if illegal
+    // Cue path up to ghost ball position
     const lineColor = illegal ? 0xff3333 : 0xffffff
     drawDottedLine(aimLine, cx, cy, ghostX, ghostY, lineColor, 0.35)
     aimLine.lineStyle(1, lineColor, 0.3)
@@ -691,8 +763,8 @@ function drawAimLineByAngle(scene, angle) {
 
     // Yellow arrow — skip entirely if illegal, shorter length
     if (!illegal) {
-      const MAX_DEFLECT   = 80   // shortened from 140
-      const MIN_DEFLECT   = 14   // shortened from 20
+      const MAX_DEFLECT   = 80
+      const MIN_DEFLECT   = 14
       const deflectLength = MIN_DEFLECT + (MAX_DEFLECT - MIN_DEFLECT) * centrality
 
       const tex = hit.x + Math.cos(targetAngle) * deflectLength
